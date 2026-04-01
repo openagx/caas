@@ -1,0 +1,6 @@
+packages:
+  - "packages/types"
+  - "packages/sdk-ts"
+  - "services/api-gateway"
+  - "apps/dashboard"
+  - "apps/docs"

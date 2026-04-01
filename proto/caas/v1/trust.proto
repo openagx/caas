@@ -1,0 +1,133 @@
+syntax = "proto3";
+
+package caas.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/OpenAGX/caas/gen/go/caas/v1;caasv1";
+
+// TrustDimensions holds the 7-dimension trust score breakdown.
+message TrustDimensions {
+  int32 identity_verification = 1;    // 0-150
+  int32 behavioral_consistency = 2;   // 0-200 (renamed from financial_behavior for generality)
+  int32 network_reputation = 3;       // 0-150
+  int32 transaction_history = 4;      // 0-150
+  int32 compliance_adherence = 5;     // 0-100
+  int32 temporal_stability = 6;       // 0-100
+  int32 peer_endorsement = 7;         // 0-150
+}
+
+// TrustScore is the computed trust for an entity.
+message TrustScore {
+  string entity_id = 1;
+  int32 overall_score = 2;            // 0-1000
+  TrustDimensions dimensions = 3;
+  double decay_rate = 4;
+  google.protobuf.Timestamp last_updated = 5;
+  string calculation_reason = 6;
+}
+
+// --- Get Trust Score ---
+
+message GetTrustScoreRequest {
+  string entity_id = 1;
+}
+
+message GetTrustScoreResponse {
+  TrustScore score = 1;
+}
+
+// --- Trust History ---
+
+message GetTrustHistoryRequest {
+  string entity_id = 1;
+  google.protobuf.Timestamp since = 2;
+  int32 limit = 3;
+}
+
+message GetTrustHistoryResponse {
+  repeated TrustScore scores = 1;
+}
+
+// --- Endorsements ---
+
+message Endorsement {
+  string id = 1;
+  string endorser_id = 2;
+  string endorsed_id = 3;
+  string endorsement_type = 4;
+  double weight = 5;
+  string evidence_hash = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp revoked_at = 8;
+}
+
+message CreateEndorsementRequest {
+  string endorser_id = 1;
+  string endorsed_id = 2;
+  string endorsement_type = 3;
+  double weight = 4;
+  string evidence_hash = 5;
+}
+
+message CreateEndorsementResponse {
+  Endorsement endorsement = 1;
+}
+
+message RevokeEndorsementRequest {
+  string endorsement_id = 1;
+}
+
+message RevokeEndorsementResponse {
+  Endorsement endorsement = 1;
+}
+
+// --- Trust Graph ---
+
+message GetTrustGraphRequest {
+  string entity_id = 1;
+  int32 depth = 2;  // Number of hops (default 2)
+}
+
+message TrustEdge {
+  string source_id = 1;
+  string target_id = 2;
+  int32 trust_score = 3;
+  string relationship_type = 4;
+}
+
+message TrustNode {
+  string entity_id = 1;
+  string display_name = 2;
+  string entity_type = 3;
+  int32 trust_score = 4;
+}
+
+message GetTrustGraphResponse {
+  repeated TrustNode nodes = 1;
+  repeated TrustEdge edges = 2;
+}
+
+// --- Trust Verification ---
+
+message VerifyTrustRequest {
+  string entity_id = 1;
+  int32 minimum_score = 2;
+  map<string, int32> minimum_dimensions = 3;
+}
+
+message VerifyTrustResponse {
+  bool meets_requirements = 1;
+  TrustScore current_score = 2;
+  repeated string failed_dimensions = 3;
+}
+
+// TrustService manages the social graph trust engine.
+service TrustService {
+  rpc GetTrustScore(GetTrustScoreRequest) returns (GetTrustScoreResponse);
+  rpc GetTrustHistory(GetTrustHistoryRequest) returns (GetTrustHistoryResponse);
+  rpc CreateEndorsement(CreateEndorsementRequest) returns (CreateEndorsementResponse);
+  rpc RevokeEndorsement(RevokeEndorsementRequest) returns (RevokeEndorsementResponse);
+  rpc GetTrustGraph(GetTrustGraphRequest) returns (GetTrustGraphResponse);
+  rpc VerifyTrust(VerifyTrustRequest) returns (VerifyTrustResponse);
+}

@@ -1,0 +1,99 @@
+syntax = "proto3";
+
+package caas.v1;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+
+option go_package = "github.com/OpenAGX/caas/gen/go/caas/v1;caasv1";
+
+enum FraudSeverity {
+  FRAUD_SEVERITY_UNSPECIFIED = 0;
+  FRAUD_SEVERITY_LOW = 1;
+  FRAUD_SEVERITY_MEDIUM = 2;
+  FRAUD_SEVERITY_HIGH = 3;
+  FRAUD_SEVERITY_CRITICAL = 4;
+}
+
+enum IncidentStatus {
+  INCIDENT_STATUS_UNSPECIFIED = 0;
+  INCIDENT_STATUS_OPEN = 1;
+  INCIDENT_STATUS_CONTAINED = 2;
+  INCIDENT_STATUS_INVESTIGATING = 3;
+  INCIDENT_STATUS_RESOLVED = 4;
+  INCIDENT_STATUS_FALSE_POSITIVE = 5;
+}
+
+message FraudIncident {
+  string id = 1;
+  string incident_type = 2;
+  FraudSeverity severity = 3;
+  IncidentStatus status = 4;
+  string affected_entity_id = 5;
+  google.protobuf.Timestamp detection_timestamp = 6;
+  google.protobuf.Timestamp containment_timestamp = 7;
+  int32 detection_latency_ms = 8;
+  google.protobuf.Struct evidence = 9;
+  repeated TimelineEntry timeline = 10;
+  google.protobuf.Timestamp created_at = 11;
+}
+
+message TimelineEntry {
+  string stage = 1;
+  string action = 2;
+  google.protobuf.Timestamp timestamp = 3;
+  int32 latency_ms = 4;
+  string detail = 5;
+}
+
+message ListIncidentsRequest {
+  IncidentStatus status = 1;
+  FraudSeverity min_severity = 2;
+  string affected_entity_id = 3;
+  int32 page_size = 4;
+  string page_token = 5;
+}
+
+message ListIncidentsResponse {
+  repeated FraudIncident incidents = 1;
+  string next_page_token = 2;
+}
+
+message GetIncidentRequest {
+  string id = 1;
+}
+
+message GetIncidentResponse {
+  FraudIncident incident = 1;
+}
+
+message SimulateAttackRequest {
+  string attack_type = 1;       // "account_takeover", "privilege_escalation", "sybil", "exfiltration"
+  string target_entity_id = 2;
+}
+
+message SimulateAttackResponse {
+  FraudIncident incident = 1;
+}
+
+message GetFraudMetricsRequest {}
+
+message FraudMetrics {
+  int64 total_incidents = 1;
+  int64 open_incidents = 2;
+  double avg_detection_latency_ms = 3;
+  double avg_containment_latency_ms = 4;
+  int64 false_positive_count = 5;
+  double false_positive_rate = 6;
+}
+
+message GetFraudMetricsResponse {
+  FraudMetrics metrics = 1;
+}
+
+service FraudService {
+  rpc ListIncidents(ListIncidentsRequest) returns (ListIncidentsResponse);
+  rpc GetIncident(GetIncidentRequest) returns (GetIncidentResponse);
+  rpc SimulateAttack(SimulateAttackRequest) returns (SimulateAttackResponse);
+  rpc GetFraudMetrics(GetFraudMetricsRequest) returns (GetFraudMetricsResponse);
+}

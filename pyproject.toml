@@ -1,0 +1,15 @@
+[project]
+name = "caas"
+version = "0.1.0"
+description = "CAAS: Continuous Autonomous Authorization System"
+requires-python = ">=3.9"
+
+[tool.uv.workspace]
+members = [
+    "services/fraud-pipeline",
+    "services/trust-engine",
+    "ml/models/*",
+    "ml/training",
+    "ml/serving",
+    "packages/sdk-python",
+]

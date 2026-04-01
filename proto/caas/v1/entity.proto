@@ -1,0 +1,123 @@
+syntax = "proto3";
+
+package caas.v1;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+
+option go_package = "github.com/OpenAGX/caas/gen/go/caas/v1;caasv1";
+
+// EntityType enumerates the 6 core CAAS entity classes.
+enum EntityType {
+  ENTITY_TYPE_UNSPECIFIED = 0;
+  ENTITY_TYPE_HUMAN = 1;
+  ENTITY_TYPE_ORGANIZATION = 2;
+  ENTITY_TYPE_DEVICE = 3;
+  ENTITY_TYPE_SERVICE = 4;
+  ENTITY_TYPE_AI_AGENT = 5;
+  ENTITY_TYPE_AUTONOMOUS_SYSTEM = 6;
+}
+
+// LifecycleState tracks an entity through its lifecycle.
+enum LifecycleState {
+  LIFECYCLE_STATE_UNSPECIFIED = 0;
+  LIFECYCLE_STATE_PENDING = 1;
+  LIFECYCLE_STATE_ACTIVE = 2;
+  LIFECYCLE_STATE_SUSPENDED = 3;
+  LIFECYCLE_STATE_REVOKED = 4;
+  LIFECYCLE_STATE_ARCHIVED = 5;
+}
+
+// Entity is the core unit in CAAS — every digital entity that participates in authorization.
+message Entity {
+  string id = 1;
+  string did = 2;
+  EntityType entity_type = 3;
+  string display_name = 4;
+  LifecycleState lifecycle_state = 5;
+  google.protobuf.Struct metadata = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+  google.protobuf.Timestamp suspended_at = 9;
+  google.protobuf.Timestamp revoked_at = 10;
+}
+
+// CreateEntityRequest creates a new entity in CAAS.
+message CreateEntityRequest {
+  EntityType entity_type = 1;
+  string display_name = 2;
+  google.protobuf.Struct metadata = 3;
+}
+
+message CreateEntityResponse {
+  Entity entity = 1;
+}
+
+message GetEntityRequest {
+  string id = 1;
+}
+
+message GetEntityResponse {
+  Entity entity = 1;
+}
+
+message UpdateEntityRequest {
+  string id = 1;
+  string display_name = 2;
+  google.protobuf.Struct metadata = 3;
+}
+
+message UpdateEntityResponse {
+  Entity entity = 1;
+}
+
+message ListEntitiesRequest {
+  EntityType entity_type = 1;
+  LifecycleState lifecycle_state = 2;
+  int32 page_size = 3;
+  string page_token = 4;
+}
+
+message ListEntitiesResponse {
+  repeated Entity entities = 1;
+  string next_page_token = 2;
+  int32 total_count = 3;
+}
+
+// Lifecycle transitions
+message ActivateEntityRequest {
+  string id = 1;
+}
+
+message SuspendEntityRequest {
+  string id = 1;
+  string reason = 2;
+}
+
+message RevokeEntityRequest {
+  string id = 1;
+  string reason = 2;
+}
+
+message ActivateEntityResponse {
+  Entity entity = 1;
+}
+
+message SuspendEntityResponse {
+  Entity entity = 1;
+}
+
+message RevokeEntityResponse {
+  Entity entity = 1;
+}
+
+// EntityService manages entity lifecycle.
+service EntityService {
+  rpc CreateEntity(CreateEntityRequest) returns (CreateEntityResponse);
+  rpc GetEntity(GetEntityRequest) returns (GetEntityResponse);
+  rpc UpdateEntity(UpdateEntityRequest) returns (UpdateEntityResponse);
+  rpc ListEntities(ListEntitiesRequest) returns (ListEntitiesResponse);
+  rpc ActivateEntity(ActivateEntityRequest) returns (ActivateEntityResponse);
+  rpc SuspendEntity(SuspendEntityRequest) returns (SuspendEntityResponse);
+  rpc RevokeEntity(RevokeEntityRequest) returns (RevokeEntityResponse);
+}

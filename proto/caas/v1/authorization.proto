@@ -1,0 +1,178 @@
+syntax = "proto3";
+
+package caas.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/OpenAGX/caas/gen/go/caas/v1;caasv1";
+
+// Subject identifies who is requesting access.
+message Subject {
+  string entity_type = 1;  // e.g. "user", "ai_agent", "service"
+  string entity_id = 2;
+}
+
+// Resource identifies what is being accessed.
+message Resource {
+  string resource_type = 1;  // e.g. "document", "service", "resource"
+  string resource_id = 2;
+}
+
+// AuthorizationContext provides additional context for the check.
+message AuthorizationContext {
+  // Minimum trust score required (0 = no trust check).
+  int32 require_trust_score = 1;
+  // Per-dimension minimums.
+  map<string, int32> require_dimensions = 2;
+  // Additional context for policy evaluation.
+  google.protobuf.Struct additional = 3;
+}
+
+// --- Check ---
+
+message CheckRequest {
+  Subject subject = 1;
+  string permission = 2;
+  Resource resource = 3;
+  AuthorizationContext context = 4;
+}
+
+message CheckResponse {
+  bool allowed = 1;
+  // Zookie consistency token for read-after-write consistency.
+  string consistency_token = 2;
+  // If denied, the reason.
+  string denial_reason = 3;
+  // Latency of the check in microseconds.
+  int64 check_latency_us = 4;
+}
+
+// --- Expand ---
+
+message ExpandRequest {
+  Resource resource = 1;
+  string permission = 2;
+}
+
+message ExpandResponse {
+  // Tree of subjects that have this permission.
+  SubjectTree tree = 1;
+}
+
+message SubjectTree {
+  oneof node {
+    SubjectLeaf leaf = 1;
+    SubjectUnion union = 2;
+    SubjectIntersection intersection = 3;
+  }
+}
+
+message SubjectLeaf {
+  repeated Subject subjects = 1;
+}
+
+message SubjectUnion {
+  repeated SubjectTree children = 1;
+}
+
+message SubjectIntersection {
+  repeated SubjectTree children = 1;
+}
+
+// --- Write Relationships ---
+
+message Relationship {
+  Resource resource = 1;
+  string relation = 2;
+  Subject subject = 3;
+}
+
+message WriteRelationshipsRequest {
+  repeated RelationshipUpdate updates = 1;
+}
+
+message RelationshipUpdate {
+  enum Operation {
+    OPERATION_UNSPECIFIED = 0;
+    OPERATION_CREATE = 1;
+    OPERATION_DELETE = 2;
+    OPERATION_TOUCH = 3;
+  }
+  Operation operation = 1;
+  Relationship relationship = 2;
+}
+
+message WriteRelationshipsResponse {
+  string consistency_token = 1;
+}
+
+// --- Read Relationships ---
+
+message ReadRelationshipsRequest {
+  // Filter by resource, relation, and/or subject.
+  Resource resource = 1;
+  string relation = 2;
+  Subject subject = 3;
+  int32 page_size = 4;
+  string page_token = 5;
+}
+
+message ReadRelationshipsResponse {
+  repeated Relationship relationships = 1;
+  string next_page_token = 2;
+}
+
+// --- Lookup ---
+
+message LookupSubjectsRequest {
+  Resource resource = 1;
+  string permission = 2;
+  string subject_type = 3;
+}
+
+message LookupSubjectsResponse {
+  Subject subject = 1;
+}
+
+message LookupResourcesRequest {
+  string resource_type = 1;
+  string permission = 2;
+  Subject subject = 3;
+}
+
+message LookupResourcesResponse {
+  string resource_id = 1;
+}
+
+// --- Watch ---
+
+message WatchRequest {
+  // Watch for changes to relationships matching this filter.
+  string resource_type = 1;
+  string consistency_token = 2;
+}
+
+message WatchResponse {
+  repeated RelationshipUpdate updates = 1;
+  string consistency_token = 2;
+  google.protobuf.Timestamp changed_at = 3;
+}
+
+// AuthorizationService is the core CAAS authorization engine.
+service AuthorizationService {
+  // Check whether a subject has a permission on a resource.
+  rpc Check(CheckRequest) returns (CheckResponse);
+  // Expand the permission tree for a resource.
+  rpc Expand(ExpandRequest) returns (ExpandResponse);
+  // Write (create/delete) relationship tuples.
+  rpc WriteRelationships(WriteRelationshipsRequest) returns (WriteRelationshipsResponse);
+  // Read relationship tuples.
+  rpc ReadRelationships(ReadRelationshipsRequest) returns (ReadRelationshipsResponse);
+  // Lookup all subjects with a permission on a resource.
+  rpc LookupSubjects(LookupSubjectsRequest) returns (stream LookupSubjectsResponse);
+  // Lookup all resources a subject has a permission on.
+  rpc LookupResources(LookupResourcesRequest) returns (stream LookupResourcesResponse);
+  // Watch for real-time relationship changes.
+  rpc Watch(WatchRequest) returns (stream WatchResponse);
+}

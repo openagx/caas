@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  proto-lint:
+    name: Lint Protobuf
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bufbuild/buf-setup-action@v1
+      - run: buf lint
+
+  go:
+    name: Go Services
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+      - name: Build all services
+        run: |
+          for svc in services/*/; do
+            if [ -f "$svc/go.mod" ]; then
+              echo "Building $svc..."
+              cd "$svc" && go build ./... && cd ../..
+            fi
+          done
+      - name: Test all services
+        run: |
+          for svc in services/*/; do
+            if [ -f "$svc/go.mod" ]; then
+              echo "Testing $svc..."
+              cd "$svc" && go test ./... -v && cd ../..
+            fi
+          done
+      - name: Vet all services
+        run: |
+          for svc in services/*/; do
+            if [ -f "$svc/go.mod" ]; then
+              cd "$svc" && go vet ./... && cd ../..
+            fi
+          done
+
+  typescript:
+    name: TypeScript
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+        continue-on-error: true
+      - run: pnpm -r build
+        continue-on-error: true
+      - run: pnpm -r test
+        continue-on-error: true

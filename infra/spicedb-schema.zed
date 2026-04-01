@@ -1,0 +1,63 @@
+/** CAAS Authorization Schema for SpiceDB
+ *
+ * Defines the relationship-based access control model for all 6 CAAS entity types.
+ * Uses Google Zanzibar-style tuples: resource#relation@subject
+ */
+
+definition user {}
+
+definition organization {
+    relation admin: user
+    relation member: user | organization#member
+    relation device: device
+
+    permission manage = admin
+    permission access = admin + member
+}
+
+definition device {
+    relation owner: user | organization
+    relation operator: user
+
+    permission control = owner + operator
+    permission read = control
+}
+
+definition service {
+    relation owner: organization
+    relation consumer: user | organization | ai_agent | autonomous_system
+
+    permission invoke = consumer + owner->admin
+    permission manage = owner->admin
+}
+
+definition ai_agent {
+    relation principal: user | organization
+    relation delegator: user
+    relation supervised_by: user
+
+    permission act = principal + delegator
+    permission act_unsupervised = principal
+    permission supervise = supervised_by
+}
+
+definition autonomous_system {
+    relation operator: organization
+    relation oversight: user
+    relation regulator: organization
+
+    permission operate = operator->admin & oversight
+    permission emergency_stop = oversight + regulator->admin
+    permission monitor = operator->member + oversight
+}
+
+definition resource {
+    relation owner: user | organization
+    relation viewer: user | organization | ai_agent | service
+    relation editor: user | organization | ai_agent
+
+    permission view = viewer + editor + owner
+    permission edit = editor + owner
+    permission delete = owner
+    permission manage = owner
+}
