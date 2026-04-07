@@ -116,6 +116,64 @@ services:
       redpanda:
         condition: service_healthy
 
+  # --- Application Services ---
+
+  authz-engine:
+    build:
+      context: .
+      dockerfile: infra/docker/authz-engine.Dockerfile
+    ports:
+      - "50051:50051"
+    environment:
+      AUTHZ_PORT: "50051"
+      SPICEDB_ENDPOINT: spicedb:50051
+      SPICEDB_PRESHARED_KEY: caas_dev_key
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKERS: redpanda:9092
+    depends_on:
+      spicedb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    profiles:
+      - app
+
+  entity-service:
+    build:
+      context: .
+      dockerfile: infra/docker/entity-service.Dockerfile
+    ports:
+      - "50052:50052"
+    environment:
+      ENTITY_PORT: "50052"
+      DATABASE_URL: postgres://caas:caas_dev@postgres:5432/caas
+      KAFKA_BROKERS: redpanda:9092
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    profiles:
+      - app
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: infra/docker/api-gateway.Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      API_PORT: "3001"
+      ENTITY_ENDPOINT: entity-service:50052
+      AUTHZ_ENDPOINT: authz-engine:50051
+    depends_on:
+      - authz-engine
+      - entity-service
+    profiles:
+      - app
+
 volumes:
   postgres_data:
   neo4j_data:

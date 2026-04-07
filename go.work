@@ -1,12 +1,13 @@
-go 1.23.4
+go 1.25.8
 
 use (
-	./services/authz-engine
-	./services/entity-service
-	./services/trust-engine
-	./services/decision-service
-	./services/federation-service
-	./services/surplus-engine
+	./gen/go
 	./packages/common-go
 	./packages/sdk-go
+	./services/authz-engine
+	./services/decision-service
+	./services/entity-service
+	./services/federation-service
+	./services/surplus-engine
+	./services/trust-engine
 )

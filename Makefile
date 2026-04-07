@@ -1,4 +1,4 @@
-.PHONY: dev down proto build test lint seed clean
+.PHONY: dev dev-app down proto build test lint seed clean
 
 # --- Development ---
 
@@ -17,6 +17,10 @@ dev: ## Start all infrastructure services
 	@echo "  SpiceDB HTTP:     http://localhost:8443"
 	@echo "  Redpanda Kafka:   localhost:19092"
 	@echo "  Redpanda Console: http://localhost:8080"
+
+dev-app: ## Start infra + app services (Docker builds Go/TS services)
+	docker compose --profile app up -d --build
+	@echo "Full stack starting..."
 
 down: ## Stop all services
 	docker compose down

@@ -7,6 +7,12 @@
 *.test
 *.out
 coverage.*
+services/*/authz-engine
+services/*/entity-service
+services/*/trust-engine
+services/*/decision-service
+services/*/federation-service
+services/*/surplus-engine
 
 # Generated code
 gen/
