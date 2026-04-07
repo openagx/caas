@@ -187,9 +187,56 @@ write_rel resource "doc-quarterly-report" editor user "${IDS_HUMAN[2]:-charlie}"
 echo "  Wrote 33 relationship tuples"
 
 echo ""
+echo "--- Creating trust endorsements (20) ---"
+
+# Helper: create endorsement
+endorse() {
+  curl -s -X POST "$API/v1/trust/endorsements" \
+    -H "Content-Type: application/json" \
+    -d "{\"endorser_id\": \"$1\", \"endorsed_id\": \"$2\", \"endorsement_type\": \"$3\", \"weight\": $4}" > /dev/null 2>&1
+}
+
+# Identity endorsements
+endorse "${IDS_HUMAN[0]:-}" "${IDS_HUMAN[1]:-}" "identity" 0.9
+endorse "${IDS_HUMAN[2]:-}" "${IDS_HUMAN[3]:-}" "identity" 0.85
+endorse "${IDS_ORG[0]:-}" "${IDS_HUMAN[0]:-}" "identity" 1.0
+
+# Behavioral consistency
+endorse "${IDS_HUMAN[0]:-}" "${IDS_AGENT[0]:-}" "behavior" 0.8
+endorse "${IDS_HUMAN[2]:-}" "${IDS_AGENT[1]:-}" "behavior" 0.75
+endorse "${IDS_ORG[1]:-}" "${IDS_SERVICE[0]:-}" "behavior" 0.95
+
+# Network reputation
+endorse "${IDS_HUMAN[1]:-}" "${IDS_HUMAN[0]:-}" "reputation" 0.9
+endorse "${IDS_HUMAN[3]:-}" "${IDS_HUMAN[2]:-}" "reputation" 0.85
+endorse "${IDS_ORG[0]:-}" "${IDS_ORG[1]:-}" "reputation" 0.8
+
+# Transaction history
+endorse "${IDS_SERVICE[0]:-}" "${IDS_HUMAN[0]:-}" "transaction" 0.9
+endorse "${IDS_SERVICE[0]:-}" "${IDS_ORG[0]:-}" "transaction" 0.95
+
+# Compliance
+endorse "${IDS_ORG[2]:-}" "${IDS_AUTO[0]:-}" "compliance" 0.85
+endorse "${IDS_ORG[2]:-}" "${IDS_AUTO[1]:-}" "compliance" 0.7
+
+# Peer endorsements
+endorse "${IDS_HUMAN[0]:-}" "${IDS_HUMAN[4]:-}" "peer" 0.8
+endorse "${IDS_HUMAN[1]:-}" "${IDS_HUMAN[5]:-}" "peer" 0.75
+endorse "${IDS_HUMAN[4]:-}" "${IDS_HUMAN[0]:-}" "peer" 0.85
+endorse "${IDS_HUMAN[6]:-}" "${IDS_HUMAN[7]:-}" "peer" 0.7
+endorse "${IDS_AGENT[2]:-}" "${IDS_HUMAN[4]:-}" "peer" 0.6
+endorse "${IDS_ORG[3]:-}" "${IDS_AGENT[0]:-}" "peer" 0.9
+endorse "${IDS_ORG[4]:-}" "${IDS_AUTO[1]:-}" "peer" 0.75
+
+echo "  Created 20 trust endorsements"
+
+echo ""
 echo "=== Seed complete ==="
 echo "  36 entities created (10 human, 5 org, 8 device, 6 service, 4 AI agent, 3 autonomous)"
 echo "  30 activated, 3 suspended, 2 revoked"
 echo "  33 relationship tuples written"
+echo "  20 trust endorsements created"
 echo ""
-echo "Try: curl $API/v1/entities | python3 -m json.tool"
+echo "Try:"
+echo "  curl $API/v1/entities | python3 -m json.tool"
+echo "  curl $API/v1/trust/<entity-id> | python3 -m json.tool"

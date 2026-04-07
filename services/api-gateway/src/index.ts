@@ -2,17 +2,19 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
-import { createEntityClient, createAuthzClient } from "./grpc-client.js";
+import { createEntityClient, createAuthzClient, createTrustClient } from "./grpc-client.js";
 
 const PORT = parseInt(process.env.API_PORT || "3001", 10);
 const ENTITY_ENDPOINT = process.env.ENTITY_ENDPOINT || "localhost:50052";
 const AUTHZ_ENDPOINT = process.env.AUTHZ_ENDPOINT || "localhost:50051";
+const TRUST_ENDPOINT = process.env.TRUST_ENDPOINT || "localhost:50053";
 
 const app = Fastify({ logger: true });
 
 // gRPC clients
 const entityClient = createEntityClient(ENTITY_ENDPOINT);
 const authzClient = createAuthzClient(AUTHZ_ENDPOINT);
+const trustClient = createTrustClient(TRUST_ENDPOINT);
 
 // --- Plugins ---
 
@@ -30,6 +32,7 @@ await app.register(swagger, {
       { name: "entities", description: "Entity lifecycle management" },
       { name: "authorization", description: "Permission checks and lookups" },
       { name: "relationships", description: "Relationship tuple management" },
+      { name: "trust", description: "Trust scoring, endorsements, and graph" },
     ],
   },
 });
@@ -410,6 +413,158 @@ app.get<{
       relation: req.query.relation || "",
       subjectType: req.query.subject_type || "",
       subjectId: req.query.subject_id || "",
+    });
+  }
+);
+
+// --- Trust Routes ---
+
+app.get<{ Params: { entityId: string } }>(
+  "/v1/trust/:entityId",
+  {
+    schema: {
+      tags: ["trust"],
+      params: {
+        type: "object",
+        properties: { entityId: { type: "string" } },
+      },
+    },
+  },
+  async (req) => {
+    return trustClient.getTrustScore({ entityId: req.params.entityId });
+  }
+);
+
+app.get<{ Params: { entityId: string }; Querystring: { limit?: number } }>(
+  "/v1/trust/:entityId/history",
+  {
+    schema: {
+      tags: ["trust"],
+      params: {
+        type: "object",
+        properties: { entityId: { type: "string" } },
+      },
+      querystring: {
+        type: "object",
+        properties: { limit: { type: "integer", default: 50 } },
+      },
+    },
+  },
+  async (req) => {
+    return trustClient.getTrustHistory({
+      entityId: req.params.entityId,
+      limit: req.query.limit || 50,
+    });
+  }
+);
+
+app.get<{ Params: { entityId: string }; Querystring: { depth?: number } }>(
+  "/v1/trust/:entityId/graph",
+  {
+    schema: {
+      tags: ["trust"],
+      params: {
+        type: "object",
+        properties: { entityId: { type: "string" } },
+      },
+      querystring: {
+        type: "object",
+        properties: { depth: { type: "integer", default: 2 } },
+      },
+    },
+  },
+  async (req) => {
+    return trustClient.getTrustGraph({
+      entityId: req.params.entityId,
+      depth: req.query.depth || 2,
+    });
+  }
+);
+
+app.post<{
+  Body: {
+    endorser_id: string;
+    endorsed_id: string;
+    endorsement_type: string;
+    weight?: number;
+    evidence_hash?: string;
+  };
+}>(
+  "/v1/trust/endorsements",
+  {
+    schema: {
+      tags: ["trust"],
+      body: {
+        type: "object",
+        required: ["endorser_id", "endorsed_id", "endorsement_type"],
+        properties: {
+          endorser_id: { type: "string" },
+          endorsed_id: { type: "string" },
+          endorsement_type: { type: "string" },
+          weight: { type: "number", default: 1.0 },
+          evidence_hash: { type: "string" },
+        },
+      },
+    },
+  },
+  async (req, reply) => {
+    const result = await trustClient.createEndorsement({
+      endorserId: req.body.endorser_id,
+      endorsedId: req.body.endorsed_id,
+      endorsementType: req.body.endorsement_type,
+      weight: req.body.weight || 1.0,
+      evidenceHash: req.body.evidence_hash || "",
+    });
+    reply.code(201).send(result);
+  }
+);
+
+app.delete<{ Params: { id: string } }>(
+  "/v1/trust/endorsements/:id",
+  {
+    schema: {
+      tags: ["trust"],
+      params: {
+        type: "object",
+        properties: { id: { type: "string" } },
+      },
+    },
+  },
+  async (req) => {
+    return trustClient.revokeEndorsement({ endorsementId: req.params.id });
+  }
+);
+
+app.post<{
+  Body: {
+    entity_id: string;
+    minimum_score?: number;
+    minimum_dimensions?: Record<string, number>;
+  };
+}>(
+  "/v1/trust/verify",
+  {
+    schema: {
+      tags: ["trust"],
+      body: {
+        type: "object",
+        required: ["entity_id"],
+        properties: {
+          entity_id: { type: "string" },
+          minimum_score: { type: "integer" },
+          minimum_dimensions: {
+            type: "object",
+            additionalProperties: { type: "integer" },
+          },
+        },
+      },
+    },
+  },
+  async (req) => {
+    return trustClient.verifyTrust({
+      entityId: req.body.entity_id,
+      minimumScore: req.body.minimum_score || 0,
+      minimumDimensions: req.body.minimum_dimensions || {},
     });
   }
 );

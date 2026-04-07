@@ -50,6 +50,24 @@ export function createEntityClient(endpoint: string) {
   };
 }
 
+// Trust Service client
+export function createTrustClient(endpoint: string) {
+  const proto = loadProto("caas/v1/trust.proto") as any;
+  const TrustService = proto.caas.v1.TrustService;
+  const client = new TrustService(
+    endpoint,
+    grpc.credentials.createInsecure()
+  );
+  return {
+    getTrustScore: promisify(client, "getTrustScore"),
+    getTrustHistory: promisify(client, "getTrustHistory"),
+    createEndorsement: promisify(client, "createEndorsement"),
+    revokeEndorsement: promisify(client, "revokeEndorsement"),
+    getTrustGraph: promisify(client, "getTrustGraph"),
+    verifyTrust: promisify(client, "verifyTrust"),
+  };
+}
+
 // Authorization Service client
 export function createAuthzClient(endpoint: string) {
   const proto = loadProto("caas/v1/authorization.proto") as any;

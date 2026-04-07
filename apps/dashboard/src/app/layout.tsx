@@ -29,9 +29,10 @@ export default function RootLayout({
             <NavLink href="/">Dashboard</NavLink>
             <NavLink href="/entities">Entities</NavLink>
             <NavLink href="/relationships">Relationships</NavLink>
+            <NavLink href="/trust">Trust Scores</NavLink>
             <NavLink href="/permissions">Permission Tester</NavLink>
             <div style={{ marginTop: "auto", padding: "0 8px", fontSize: 12, color: "#666" }}>
-              v0.1.0 — Phase 1
+              v0.2.0 — Phase 2
             </div>
           </nav>
           <main style={{ flex: 1, padding: 32 }}>
