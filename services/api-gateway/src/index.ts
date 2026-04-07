@@ -8,6 +8,7 @@ const PORT = parseInt(process.env.API_PORT || "3001", 10);
 const ENTITY_ENDPOINT = process.env.ENTITY_ENDPOINT || "localhost:50052";
 const AUTHZ_ENDPOINT = process.env.AUTHZ_ENDPOINT || "localhost:50051";
 const TRUST_ENDPOINT = process.env.TRUST_ENDPOINT || "localhost:50053";
+const FRAUD_URL = process.env.FRAUD_URL || "http://localhost:50054";
 
 const app = Fastify({ logger: true });
 
@@ -15,6 +16,19 @@ const app = Fastify({ logger: true });
 const entityClient = createEntityClient(ENTITY_ENDPOINT);
 const authzClient = createAuthzClient(AUTHZ_ENDPOINT);
 const trustClient = createTrustClient(TRUST_ENDPOINT);
+
+// HTTP proxy helper for fraud-pipeline (REST-based service)
+async function fraudFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${FRAUD_URL}${path}`, {
+    ...init,
+    headers: { "Content-Type": "application/json", ...init?.headers },
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Fraud service error ${res.status}: ${text}`);
+  }
+  return res.json() as Promise<T>;
+}
 
 // --- Plugins ---
 
@@ -33,6 +47,7 @@ await app.register(swagger, {
       { name: "authorization", description: "Permission checks and lookups" },
       { name: "relationships", description: "Relationship tuple management" },
       { name: "trust", description: "Trust scoring, endorsements, and graph" },
+      { name: "fraud", description: "Fraud detection, incidents, and simulation" },
     ],
   },
 });
@@ -566,6 +581,99 @@ app.post<{
       minimumScore: req.body.minimum_score || 0,
       minimumDimensions: req.body.minimum_dimensions || {},
     });
+  }
+);
+
+// --- Fraud Routes (proxy to fraud-pipeline REST API) ---
+
+app.get<{
+  Querystring: {
+    status?: string;
+    min_severity?: string;
+    affected_entity_id?: string;
+    page_size?: number;
+    page_token?: string;
+  };
+}>(
+  "/v1/fraud/incidents",
+  {
+    schema: {
+      tags: ["fraud"],
+      querystring: {
+        type: "object",
+        properties: {
+          status: { type: "string" },
+          min_severity: { type: "string" },
+          affected_entity_id: { type: "string" },
+          page_size: { type: "integer", default: 50 },
+          page_token: { type: "string" },
+        },
+      },
+    },
+  },
+  async (req) => {
+    const qs = new URLSearchParams();
+    if (req.query.status) qs.set("status", req.query.status);
+    if (req.query.min_severity) qs.set("min_severity", req.query.min_severity);
+    if (req.query.affected_entity_id) qs.set("affected_entity_id", req.query.affected_entity_id);
+    if (req.query.page_size) qs.set("page_size", String(req.query.page_size));
+    if (req.query.page_token) qs.set("page_token", req.query.page_token);
+    const query = qs.toString();
+    return fraudFetch(`/v1/fraud/incidents${query ? `?${query}` : ""}`);
+  }
+);
+
+app.get<{ Params: { id: string } }>(
+  "/v1/fraud/incidents/:id",
+  {
+    schema: {
+      tags: ["fraud"],
+      params: {
+        type: "object",
+        properties: { id: { type: "string" } },
+      },
+    },
+  },
+  async (req) => {
+    return fraudFetch(`/v1/fraud/incidents/${req.params.id}`);
+  }
+);
+
+app.post<{
+  Body: { attack_type: string; target_entity_id: string };
+}>(
+  "/v1/fraud/simulate",
+  {
+    schema: {
+      tags: ["fraud"],
+      body: {
+        type: "object",
+        required: ["attack_type", "target_entity_id"],
+        properties: {
+          attack_type: {
+            type: "string",
+            enum: ["account_takeover", "privilege_escalation", "sybil", "exfiltration", "impersonation"],
+          },
+          target_entity_id: { type: "string" },
+        },
+      },
+    },
+  },
+  async (req) => {
+    return fraudFetch("/v1/fraud/simulate", {
+      method: "POST",
+      body: JSON.stringify(req.body),
+    });
+  }
+);
+
+app.get(
+  "/v1/fraud/metrics",
+  {
+    schema: { tags: ["fraud"] },
+  },
+  async () => {
+    return fraudFetch("/v1/fraud/metrics");
   }
 );
 

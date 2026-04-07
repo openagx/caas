@@ -195,6 +195,26 @@ services:
     profiles:
       - app
 
+  fraud-pipeline:
+    build:
+      context: .
+      dockerfile: infra/docker/fraud-pipeline.Dockerfile
+    ports:
+      - "50054:50054"
+    environment:
+      FRAUD_PORT: "50054"
+      DATABASE_URL: postgres://caas:caas_dev@postgres:5432/caas
+      KAFKA_BROKERS: redpanda:9092
+      AUTHZ_ENDPOINT: authz-engine:50051
+      ENTITY_ENDPOINT: entity-service:50052
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    profiles:
+      - app
+
   api-gateway:
     build:
       context: .
@@ -206,10 +226,12 @@ services:
       ENTITY_ENDPOINT: entity-service:50052
       AUTHZ_ENDPOINT: authz-engine:50051
       TRUST_ENDPOINT: trust-engine:50053
+      FRAUD_URL: http://fraud-pipeline:50054
     depends_on:
       - authz-engine
       - entity-service
       - trust-engine
+      - fraud-pipeline
     profiles:
       - app
 

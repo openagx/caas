@@ -30,6 +30,7 @@ export default function RootLayout({
             <NavLink href="/entities">Entities</NavLink>
             <NavLink href="/relationships">Relationships</NavLink>
             <NavLink href="/trust">Trust Scores</NavLink>
+            <NavLink href="/fraud">Fraud Detection</NavLink>
             <NavLink href="/permissions">Permission Tester</NavLink>
             <div style={{ marginTop: "auto", padding: "0 8px", fontSize: 12, color: "#666" }}>
               v0.2.0 — Phase 2

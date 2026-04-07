@@ -1,0 +1,8 @@
+grpcio>=1.70.0
+grpcio-tools>=1.70.0
+protobuf>=5.29.0
+confluent-kafka>=2.8.0
+scikit-learn>=1.6.0
+numpy>=2.0.0
+psycopg[binary]>=3.2.0
+pydantic>=2.10.0
