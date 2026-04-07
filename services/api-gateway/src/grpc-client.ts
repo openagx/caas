@@ -117,6 +117,30 @@ export function createFederationClient(endpoint: string) {
   };
 }
 
+// Surplus Service client
+export function createSurplusClient(endpoint: string) {
+  const proto = loadProto("caas/v1/surplus.proto") as any;
+  const SurplusService = proto.caas.v1.SurplusService;
+  const client = new SurplusService(
+    endpoint,
+    grpc.credentials.createInsecure()
+  );
+  return {
+    createListing: promisify(client, "createListing"),
+    getListing: promisify(client, "getListing"),
+    listListings: promisify(client, "listListings"),
+    updateListing: promisify(client, "updateListing"),
+    cancelListing: promisify(client, "cancelListing"),
+    findMatches: promisify(client, "findMatches"),
+    acceptMatch: promisify(client, "acceptMatch"),
+    updateMatchStatus: promisify(client, "updateMatchStatus"),
+    getMatch: promisify(client, "getMatch"),
+    listMatches: promisify(client, "listMatches"),
+    verifyQuality: promisify(client, "verifyQuality"),
+    getSurplusMetrics: promisify(client, "getSurplusMetrics"),
+  };
+}
+
 // Authorization Service client
 export function createAuthzClient(endpoint: string) {
   const proto = loadProto("caas/v1/authorization.proto") as any;

@@ -2,7 +2,7 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
-import { createEntityClient, createAuthzClient, createTrustClient, createDecisionClient, createFederationClient } from "./grpc-client.js";
+import { createEntityClient, createAuthzClient, createTrustClient, createDecisionClient, createFederationClient, createSurplusClient } from "./grpc-client.js";
 
 const PORT = parseInt(process.env.API_PORT || "3001", 10);
 const ENTITY_ENDPOINT = process.env.ENTITY_ENDPOINT || "localhost:50052";
@@ -11,6 +11,7 @@ const TRUST_ENDPOINT = process.env.TRUST_ENDPOINT || "localhost:50053";
 const FRAUD_URL = process.env.FRAUD_URL || "http://localhost:50054";
 const DECISION_ENDPOINT = process.env.DECISION_ENDPOINT || "localhost:50055";
 const FEDERATION_ENDPOINT = process.env.FEDERATION_ENDPOINT || "localhost:50056";
+const SURPLUS_ENDPOINT = process.env.SURPLUS_ENDPOINT || "localhost:50057";
 
 const app = Fastify({ logger: true });
 
@@ -20,6 +21,7 @@ const authzClient = createAuthzClient(AUTHZ_ENDPOINT);
 const trustClient = createTrustClient(TRUST_ENDPOINT);
 const decisionClient = createDecisionClient(DECISION_ENDPOINT);
 const federationClient = createFederationClient(FEDERATION_ENDPOINT);
+const surplusClient = createSurplusClient(SURPLUS_ENDPOINT);
 
 // HTTP proxy helper for fraud-pipeline (REST-based service)
 async function fraudFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -56,6 +58,7 @@ await app.register(swagger, {
       { name: "federation", description: "Sovereign nodes, treaties, federated queries" },
       { name: "credentials", description: "Verifiable credentials issuance and verification" },
       { name: "authority", description: "Authority override hierarchy (5 tiers)" },
+      { name: "surplus", description: "Surplus/need listings, matching, and quality verification" },
     ],
   },
 });
@@ -1257,6 +1260,348 @@ app.get<{ Querystring: { entity_id?: string; credential_type?: string; page_size
       pageSize: req.query.page_size || 20,
       page: req.query.page || 1,
     });
+  }
+);
+
+// --- Surplus Routes ---
+
+app.post<{
+  Body: {
+    entity_id: string;
+    type: number;
+    category: number;
+    title: string;
+    description?: string;
+    quantity?: number;
+    unit?: string;
+    urgency?: number;
+    location?: { latitude: number; longitude: number; address?: string; region?: string; country?: string };
+    max_distance_km?: number;
+    metadata?: Record<string, unknown>;
+    expires_at?: string;
+  };
+}>(
+  "/v1/surplus/listings",
+  {
+    schema: {
+      tags: ["surplus"],
+      body: {
+        type: "object",
+        required: ["entity_id", "type", "category", "title"],
+        properties: {
+          entity_id: { type: "string" },
+          type: { type: "integer", minimum: 1, maximum: 2 },
+          category: { type: "integer", minimum: 1, maximum: 10 },
+          title: { type: "string" },
+          description: { type: "string" },
+          quantity: { type: "integer", default: 1 },
+          unit: { type: "string", default: "units" },
+          urgency: { type: "integer", minimum: 0, maximum: 4 },
+          location: {
+            type: "object",
+            properties: {
+              latitude: { type: "number" },
+              longitude: { type: "number" },
+              address: { type: "string" },
+              region: { type: "string" },
+              country: { type: "string" },
+            },
+          },
+          max_distance_km: { type: "number", default: 100 },
+          metadata: { type: "object", additionalProperties: true },
+          expires_at: { type: "string" },
+        },
+      },
+    },
+  },
+  async (req, reply) => {
+    const result = await surplusClient.createListing({
+      entityId: req.body.entity_id,
+      type: req.body.type,
+      category: req.body.category,
+      title: req.body.title,
+      description: req.body.description || "",
+      quantity: req.body.quantity || 1,
+      unit: req.body.unit || "units",
+      urgency: req.body.urgency || 0,
+      location: req.body.location || undefined,
+      maxDistanceKm: req.body.max_distance_km || 100,
+      metadata: req.body.metadata || undefined,
+      expiresAt: req.body.expires_at ? { seconds: Math.floor(new Date(req.body.expires_at).getTime() / 1000), nanos: 0 } : undefined,
+    });
+    reply.code(201).send(result);
+  }
+);
+
+app.get<{ Params: { id: string } }>(
+  "/v1/surplus/listings/:id",
+  {
+    schema: {
+      tags: ["surplus"],
+      params: {
+        type: "object",
+        properties: { id: { type: "string" } },
+      },
+    },
+  },
+  async (req) => {
+    return surplusClient.getListing({ listingId: req.params.id });
+  }
+);
+
+app.get<{
+  Querystring: {
+    type_filter?: number;
+    category_filter?: number;
+    status_filter?: number;
+    entity_id?: string;
+    page_size?: number;
+    page?: number;
+  };
+}>(
+  "/v1/surplus/listings",
+  {
+    schema: {
+      tags: ["surplus"],
+      querystring: {
+        type: "object",
+        properties: {
+          type_filter: { type: "integer" },
+          category_filter: { type: "integer" },
+          status_filter: { type: "integer" },
+          entity_id: { type: "string" },
+          page_size: { type: "integer", default: 20 },
+          page: { type: "integer", default: 1 },
+        },
+      },
+    },
+  },
+  async (req) => {
+    return surplusClient.listListings({
+      typeFilter: req.query.type_filter || 0,
+      categoryFilter: req.query.category_filter || 0,
+      statusFilter: req.query.status_filter || 0,
+      entityId: req.query.entity_id || "",
+      pageSize: req.query.page_size || 20,
+      page: req.query.page || 1,
+    });
+  }
+);
+
+app.patch<{
+  Params: { id: string };
+  Body: { quantity?: number; urgency?: number; status?: number };
+}>(
+  "/v1/surplus/listings/:id",
+  {
+    schema: {
+      tags: ["surplus"],
+      params: {
+        type: "object",
+        properties: { id: { type: "string" } },
+      },
+      body: {
+        type: "object",
+        properties: {
+          quantity: { type: "integer" },
+          urgency: { type: "integer" },
+          status: { type: "integer" },
+        },
+      },
+    },
+  },
+  async (req) => {
+    return surplusClient.updateListing({
+      listingId: req.params.id,
+      quantity: req.body.quantity || 0,
+      urgency: req.body.urgency || 0,
+      status: req.body.status || 0,
+    });
+  }
+);
+
+app.post<{ Params: { id: string }; Body: { reason?: string } }>(
+  "/v1/surplus/listings/:id/cancel",
+  {
+    schema: {
+      tags: ["surplus"],
+      params: {
+        type: "object",
+        properties: { id: { type: "string" } },
+      },
+      body: {
+        type: "object",
+        properties: { reason: { type: "string" } },
+      },
+    },
+  },
+  async (req) => {
+    return surplusClient.cancelListing({
+      listingId: req.params.id,
+      reason: req.body?.reason || "",
+    });
+  }
+);
+
+app.post<{
+  Body: { listing_id: string; max_results?: number };
+}>(
+  "/v1/surplus/matches/find",
+  {
+    schema: {
+      tags: ["surplus"],
+      body: {
+        type: "object",
+        required: ["listing_id"],
+        properties: {
+          listing_id: { type: "string" },
+          max_results: { type: "integer", default: 10 },
+        },
+      },
+    },
+  },
+  async (req) => {
+    return surplusClient.findMatches({
+      listingId: req.body.listing_id,
+      maxResults: req.body.max_results || 10,
+    });
+  }
+);
+
+app.post<{ Params: { id: string } }>(
+  "/v1/surplus/matches/:id/accept",
+  {
+    schema: {
+      tags: ["surplus"],
+      params: {
+        type: "object",
+        properties: { id: { type: "string" } },
+      },
+    },
+  },
+  async (req) => {
+    return surplusClient.acceptMatch({ matchId: req.params.id });
+  }
+);
+
+app.patch<{
+  Params: { id: string };
+  Body: { status: number };
+}>(
+  "/v1/surplus/matches/:id/status",
+  {
+    schema: {
+      tags: ["surplus"],
+      params: {
+        type: "object",
+        properties: { id: { type: "string" } },
+      },
+      body: {
+        type: "object",
+        required: ["status"],
+        properties: {
+          status: { type: "integer", minimum: 1, maximum: 7 },
+        },
+      },
+    },
+  },
+  async (req) => {
+    return surplusClient.updateMatchStatus({
+      matchId: req.params.id,
+      status: req.body.status,
+    });
+  }
+);
+
+app.get<{ Params: { id: string } }>(
+  "/v1/surplus/matches/:id",
+  {
+    schema: {
+      tags: ["surplus"],
+      params: {
+        type: "object",
+        properties: { id: { type: "string" } },
+      },
+    },
+  },
+  async (req) => {
+    return surplusClient.getMatch({ matchId: req.params.id });
+  }
+);
+
+app.get<{
+  Querystring: { entity_id?: string; status_filter?: number; page_size?: number; page?: number };
+}>(
+  "/v1/surplus/matches",
+  {
+    schema: {
+      tags: ["surplus"],
+      querystring: {
+        type: "object",
+        properties: {
+          entity_id: { type: "string" },
+          status_filter: { type: "integer" },
+          page_size: { type: "integer", default: 20 },
+          page: { type: "integer", default: 1 },
+        },
+      },
+    },
+  },
+  async (req) => {
+    return surplusClient.listMatches({
+      entityId: req.query.entity_id || "",
+      statusFilter: req.query.status_filter || 0,
+      pageSize: req.query.page_size || 20,
+      page: req.query.page || 1,
+    });
+  }
+);
+
+app.post<{
+  Body: {
+    match_id: string;
+    verifier_entity_id: string;
+    quality_score: number;
+    meets_requirements: boolean;
+    notes?: string;
+  };
+}>(
+  "/v1/surplus/quality",
+  {
+    schema: {
+      tags: ["surplus"],
+      body: {
+        type: "object",
+        required: ["match_id", "verifier_entity_id", "quality_score", "meets_requirements"],
+        properties: {
+          match_id: { type: "string" },
+          verifier_entity_id: { type: "string" },
+          quality_score: { type: "integer", minimum: 0, maximum: 100 },
+          meets_requirements: { type: "boolean" },
+          notes: { type: "string" },
+        },
+      },
+    },
+  },
+  async (req, reply) => {
+    const result = await surplusClient.verifyQuality({
+      matchId: req.body.match_id,
+      verifierEntityId: req.body.verifier_entity_id,
+      qualityScore: req.body.quality_score,
+      meetsRequirements: req.body.meets_requirements,
+      notes: req.body.notes || "",
+    });
+    reply.code(201).send(result);
+  }
+);
+
+app.get(
+  "/v1/surplus/metrics",
+  {
+    schema: { tags: ["surplus"] },
+  },
+  async () => {
+    return surplusClient.getSurplusMetrics({});
   }
 );
 

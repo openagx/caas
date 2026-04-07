@@ -1,0 +1,273 @@
+syntax = "proto3";
+
+package caas.v1;
+
+option go_package = "github.com/OpenAGX/caas/gen/go/caas/v1;caasv1";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+
+// --- Enums ---
+
+enum ListingType {
+  LISTING_TYPE_UNSPECIFIED = 0;
+  LISTING_TYPE_SURPLUS = 1;     // Entity has excess to offer
+  LISTING_TYPE_NEED = 2;        // Entity needs something
+}
+
+enum ListingStatus {
+  LISTING_STATUS_UNSPECIFIED = 0;
+  LISTING_STATUS_ACTIVE = 1;
+  LISTING_STATUS_MATCHED = 2;
+  LISTING_STATUS_FULFILLED = 3;
+  LISTING_STATUS_EXPIRED = 4;
+  LISTING_STATUS_CANCELLED = 5;
+}
+
+enum MatchStatus {
+  MATCH_STATUS_UNSPECIFIED = 0;
+  MATCH_STATUS_PROPOSED = 1;
+  MATCH_STATUS_ACCEPTED = 2;
+  MATCH_STATUS_IN_TRANSIT = 3;
+  MATCH_STATUS_DELIVERED = 4;
+  MATCH_STATUS_VERIFIED = 5;
+  MATCH_STATUS_REJECTED = 6;
+  MATCH_STATUS_CANCELLED = 7;
+}
+
+enum UrgencyLevel {
+  URGENCY_LEVEL_UNSPECIFIED = 0;
+  URGENCY_LEVEL_LOW = 1;
+  URGENCY_LEVEL_MEDIUM = 2;
+  URGENCY_LEVEL_HIGH = 3;
+  URGENCY_LEVEL_CRITICAL = 4;
+}
+
+enum ResourceCategory {
+  RESOURCE_CATEGORY_UNSPECIFIED = 0;
+  RESOURCE_CATEGORY_FOOD = 1;
+  RESOURCE_CATEGORY_MEDICAL = 2;
+  RESOURCE_CATEGORY_SHELTER = 3;
+  RESOURCE_CATEGORY_CLOTHING = 4;
+  RESOURCE_CATEGORY_EQUIPMENT = 5;
+  RESOURCE_CATEGORY_TRANSPORT = 6;
+  RESOURCE_CATEGORY_COMPUTE = 7;    // Cloud/compute resources
+  RESOURCE_CATEGORY_ENERGY = 8;
+  RESOURCE_CATEGORY_LABOR = 9;
+  RESOURCE_CATEGORY_OTHER = 10;
+}
+
+// --- Messages ---
+
+// Geographic location for geospatial matching.
+message GeoLocation {
+  double latitude = 1;
+  double longitude = 2;
+  string address = 3;
+  string region = 4;    // Administrative region
+  string country = 5;   // ISO 3166-1 alpha-2
+}
+
+// A surplus or need listing.
+message Listing {
+  string id = 1;
+  string entity_id = 2;             // Entity offering/needing
+  ListingType type = 3;
+  ResourceCategory category = 4;
+  string title = 5;
+  string description = 6;
+  int32 quantity = 7;
+  string unit = 8;                   // e.g., "kg", "units", "hours"
+  UrgencyLevel urgency = 9;
+  GeoLocation location = 10;
+  double max_distance_km = 11;       // Maximum acceptable distance for matching
+  ListingStatus status = 12;
+  google.protobuf.Struct metadata = 13;
+  google.protobuf.Timestamp expires_at = 14;
+  google.protobuf.Timestamp created_at = 15;
+  google.protobuf.Timestamp updated_at = 16;
+}
+
+// A match between a surplus and a need.
+message Match {
+  string id = 1;
+  string surplus_listing_id = 2;
+  string need_listing_id = 3;
+  string surplus_entity_id = 4;
+  string need_entity_id = 5;
+  double distance_km = 6;
+  double match_score = 7;            // 0-100 composite score
+  MatchStatus status = 8;
+  int32 matched_quantity = 9;
+  string unit = 10;
+  google.protobuf.Struct logistics = 11;   // Delivery/logistics metadata
+  google.protobuf.Timestamp created_at = 12;
+  google.protobuf.Timestamp updated_at = 13;
+}
+
+// Quality verification result for a fulfilled match.
+message QualityVerification {
+  string id = 1;
+  string match_id = 2;
+  string verifier_entity_id = 3;
+  int32 quality_score = 4;           // 0-100
+  bool meets_requirements = 5;
+  string notes = 6;
+  google.protobuf.Timestamp verified_at = 7;
+}
+
+// --- Service ---
+
+service SurplusService {
+  // Listing management
+  rpc CreateListing(CreateListingRequest) returns (CreateListingResponse);
+  rpc GetListing(GetListingRequest) returns (GetListingResponse);
+  rpc ListListings(ListListingsRequest) returns (ListListingsResponse);
+  rpc UpdateListing(UpdateListingRequest) returns (UpdateListingResponse);
+  rpc CancelListing(CancelListingRequest) returns (CancelListingResponse);
+
+  // Matching engine
+  rpc FindMatches(FindMatchesRequest) returns (FindMatchesResponse);
+  rpc AcceptMatch(AcceptMatchRequest) returns (AcceptMatchResponse);
+  rpc UpdateMatchStatus(UpdateMatchStatusRequest) returns (UpdateMatchStatusResponse);
+  rpc GetMatch(GetMatchRequest) returns (GetMatchResponse);
+  rpc ListMatches(ListMatchesRequest) returns (ListMatchesResponse);
+
+  // Quality verification
+  rpc VerifyQuality(VerifyQualityRequest) returns (VerifyQualityResponse);
+
+  // Analytics
+  rpc GetSurplusMetrics(GetSurplusMetricsRequest) returns (GetSurplusMetricsResponse);
+}
+
+// --- Request/Response Messages ---
+
+// Listings
+
+message CreateListingRequest {
+  string entity_id = 1;
+  ListingType type = 2;
+  ResourceCategory category = 3;
+  string title = 4;
+  string description = 5;
+  int32 quantity = 6;
+  string unit = 7;
+  UrgencyLevel urgency = 8;
+  GeoLocation location = 9;
+  double max_distance_km = 10;
+  google.protobuf.Struct metadata = 11;
+  google.protobuf.Timestamp expires_at = 12;
+}
+message CreateListingResponse {
+  Listing listing = 1;
+}
+
+message GetListingRequest {
+  string listing_id = 1;
+}
+message GetListingResponse {
+  Listing listing = 1;
+}
+
+message ListListingsRequest {
+  ListingType type_filter = 1;
+  ResourceCategory category_filter = 2;
+  ListingStatus status_filter = 3;
+  string entity_id = 4;
+  GeoLocation near_location = 5;
+  double within_km = 6;
+  int32 page_size = 7;
+  int32 page = 8;
+}
+message ListListingsResponse {
+  repeated Listing listings = 1;
+  int32 total = 2;
+}
+
+message UpdateListingRequest {
+  string listing_id = 1;
+  int32 quantity = 2;
+  UrgencyLevel urgency = 3;
+  ListingStatus status = 4;
+}
+message UpdateListingResponse {
+  Listing listing = 1;
+}
+
+message CancelListingRequest {
+  string listing_id = 1;
+  string reason = 2;
+}
+message CancelListingResponse {
+  Listing listing = 1;
+}
+
+// Matching
+
+message FindMatchesRequest {
+  string listing_id = 1;
+  int32 max_results = 2;
+}
+message FindMatchesResponse {
+  repeated Match matches = 1;
+}
+
+message AcceptMatchRequest {
+  string match_id = 1;
+}
+message AcceptMatchResponse {
+  Match match = 1;
+}
+
+message UpdateMatchStatusRequest {
+  string match_id = 1;
+  MatchStatus status = 2;
+}
+message UpdateMatchStatusResponse {
+  Match match = 1;
+}
+
+message GetMatchRequest {
+  string match_id = 1;
+}
+message GetMatchResponse {
+  Match match = 1;
+}
+
+message ListMatchesRequest {
+  string entity_id = 1;
+  MatchStatus status_filter = 2;
+  int32 page_size = 3;
+  int32 page = 4;
+}
+message ListMatchesResponse {
+  repeated Match matches = 1;
+  int32 total = 2;
+}
+
+// Quality
+
+message VerifyQualityRequest {
+  string match_id = 1;
+  string verifier_entity_id = 2;
+  int32 quality_score = 3;
+  bool meets_requirements = 4;
+  string notes = 5;
+}
+message VerifyQualityResponse {
+  QualityVerification verification = 1;
+}
+
+// Metrics
+
+message GetSurplusMetricsRequest {}
+message GetSurplusMetricsResponse {
+  int32 total_listings = 1;
+  int32 active_surplus = 2;
+  int32 active_needs = 3;
+  int32 total_matches = 4;
+  int32 fulfilled_matches = 5;
+  double avg_match_distance_km = 6;
+  double avg_quality_score = 7;
+  map<string, int32> listings_by_category = 8;
+}

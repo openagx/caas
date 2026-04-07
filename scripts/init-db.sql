@@ -193,6 +193,67 @@ CREATE TABLE IF NOT EXISTS verifiable_credentials (
 CREATE INDEX idx_vc_entity ON verifiable_credentials(entity_id);
 CREATE INDEX idx_vc_type ON verifiable_credentials(credential_type);
 
+-- Surplus redistribution tables
+CREATE TABLE IF NOT EXISTS surplus_listings (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    entity_id UUID NOT NULL REFERENCES entities(id),
+    listing_type TEXT NOT NULL,          -- 'surplus' or 'need'
+    category TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT,
+    quantity INTEGER NOT NULL DEFAULT 1,
+    unit TEXT NOT NULL DEFAULT 'units',
+    urgency TEXT NOT NULL DEFAULT 'medium',
+    latitude DOUBLE PRECISION,
+    longitude DOUBLE PRECISION,
+    address TEXT,
+    region TEXT,
+    country TEXT,
+    max_distance_km DOUBLE PRECISION DEFAULT 100,
+    status TEXT NOT NULL DEFAULT 'active',
+    metadata JSONB NOT NULL DEFAULT '{}',
+    expires_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_surplus_listings_entity ON surplus_listings(entity_id);
+CREATE INDEX idx_surplus_listings_type ON surplus_listings(listing_type);
+CREATE INDEX idx_surplus_listings_status ON surplus_listings(status);
+CREATE INDEX idx_surplus_listings_category ON surplus_listings(category);
+
+CREATE TABLE IF NOT EXISTS surplus_matches (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    surplus_listing_id UUID NOT NULL REFERENCES surplus_listings(id),
+    need_listing_id UUID NOT NULL REFERENCES surplus_listings(id),
+    surplus_entity_id UUID NOT NULL REFERENCES entities(id),
+    need_entity_id UUID NOT NULL REFERENCES entities(id),
+    distance_km DOUBLE PRECISION,
+    match_score DOUBLE PRECISION,
+    status TEXT NOT NULL DEFAULT 'proposed',
+    matched_quantity INTEGER NOT NULL DEFAULT 1,
+    unit TEXT NOT NULL DEFAULT 'units',
+    logistics JSONB NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_surplus_matches_surplus ON surplus_matches(surplus_listing_id);
+CREATE INDEX idx_surplus_matches_need ON surplus_matches(need_listing_id);
+CREATE INDEX idx_surplus_matches_status ON surplus_matches(status);
+
+CREATE TABLE IF NOT EXISTS quality_verifications (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    match_id UUID NOT NULL REFERENCES surplus_matches(id),
+    verifier_entity_id UUID NOT NULL REFERENCES entities(id),
+    quality_score INTEGER NOT NULL,
+    meets_requirements BOOLEAN NOT NULL DEFAULT true,
+    notes TEXT,
+    verified_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_quality_verifications_match ON quality_verifications(match_id);
+
 -- Audit log (immutable)
 CREATE TABLE IF NOT EXISTS audit_log (
     id BIGSERIAL PRIMARY KEY,

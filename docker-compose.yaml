@@ -251,6 +251,24 @@ services:
     profiles:
       - app
 
+  surplus-engine:
+    build:
+      context: .
+      dockerfile: infra/docker/surplus-engine.Dockerfile
+    ports:
+      - "50057:50057"
+    environment:
+      SURPLUS_PORT: "50057"
+      DATABASE_URL: postgres://caas:caas_dev@postgres:5432/caas
+      KAFKA_BROKERS: redpanda:9092
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    profiles:
+      - app
+
   api-gateway:
     build:
       context: .
@@ -265,6 +283,7 @@ services:
       FRAUD_URL: http://fraud-pipeline:50054
       DECISION_ENDPOINT: decision-service:50055
       FEDERATION_ENDPOINT: federation-service:50056
+      SURPLUS_ENDPOINT: surplus-engine:50057
     depends_on:
       - authz-engine
       - entity-service
@@ -272,6 +291,7 @@ services:
       - fraud-pipeline
       - decision-service
       - federation-service
+      - surplus-engine
     profiles:
       - app
 
