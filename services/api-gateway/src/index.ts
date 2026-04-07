@@ -2,13 +2,14 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
-import { createEntityClient, createAuthzClient, createTrustClient } from "./grpc-client.js";
+import { createEntityClient, createAuthzClient, createTrustClient, createDecisionClient } from "./grpc-client.js";
 
 const PORT = parseInt(process.env.API_PORT || "3001", 10);
 const ENTITY_ENDPOINT = process.env.ENTITY_ENDPOINT || "localhost:50052";
 const AUTHZ_ENDPOINT = process.env.AUTHZ_ENDPOINT || "localhost:50051";
 const TRUST_ENDPOINT = process.env.TRUST_ENDPOINT || "localhost:50053";
 const FRAUD_URL = process.env.FRAUD_URL || "http://localhost:50054";
+const DECISION_ENDPOINT = process.env.DECISION_ENDPOINT || "localhost:50055";
 
 const app = Fastify({ logger: true });
 
@@ -16,6 +17,7 @@ const app = Fastify({ logger: true });
 const entityClient = createEntityClient(ENTITY_ENDPOINT);
 const authzClient = createAuthzClient(AUTHZ_ENDPOINT);
 const trustClient = createTrustClient(TRUST_ENDPOINT);
+const decisionClient = createDecisionClient(DECISION_ENDPOINT);
 
 // HTTP proxy helper for fraud-pipeline (REST-based service)
 async function fraudFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -48,6 +50,7 @@ await app.register(swagger, {
       { name: "relationships", description: "Relationship tuple management" },
       { name: "trust", description: "Trust scoring, endorsements, and graph" },
       { name: "fraud", description: "Fraud detection, incidents, and simulation" },
+      { name: "decisions", description: "Human decision integrity, blind review, M-of-N approval" },
     ],
   },
 });
@@ -674,6 +677,176 @@ app.get(
   },
   async () => {
     return fraudFetch("/v1/fraud/metrics");
+  }
+);
+
+// --- Decision Routes ---
+
+app.post<{
+  Body: {
+    workflow_type: string;
+    subject_entity_id: string;
+    case_data?: Record<string, unknown>;
+    required_approvals?: number;
+    total_reviewers?: number;
+    blind_review?: boolean;
+    cool_off_hours?: number;
+  };
+}>(
+  "/v1/decisions/workflows",
+  {
+    schema: {
+      tags: ["decisions"],
+      body: {
+        type: "object",
+        required: ["workflow_type", "subject_entity_id"],
+        properties: {
+          workflow_type: { type: "string" },
+          subject_entity_id: { type: "string" },
+          case_data: { type: "object", additionalProperties: true },
+          required_approvals: { type: "integer", default: 2 },
+          total_reviewers: { type: "integer", default: 3 },
+          blind_review: { type: "boolean", default: true },
+          cool_off_hours: { type: "integer", default: 168 },
+        },
+      },
+    },
+  },
+  async (req, reply) => {
+    const result = await decisionClient.createWorkflow({
+      workflowType: req.body.workflow_type,
+      subjectEntityId: req.body.subject_entity_id,
+      caseData: req.body.case_data || undefined,
+      requiredApprovals: req.body.required_approvals || 2,
+      totalReviewers: req.body.total_reviewers || 3,
+      blindReview: req.body.blind_review !== false,
+      coolOffHours: req.body.cool_off_hours || 168,
+    });
+    reply.code(201).send(result);
+  }
+);
+
+app.get<{ Params: { id: string } }>(
+  "/v1/decisions/workflows/:id",
+  {
+    schema: {
+      tags: ["decisions"],
+      params: {
+        type: "object",
+        properties: { id: { type: "string" } },
+      },
+    },
+  },
+  async (req) => {
+    return decisionClient.getWorkflow({ id: req.params.id });
+  }
+);
+
+app.get<{
+  Querystring: { status?: number; subject_entity_id?: string; page_size?: number; page_token?: string };
+}>(
+  "/v1/decisions/workflows",
+  {
+    schema: {
+      tags: ["decisions"],
+      querystring: {
+        type: "object",
+        properties: {
+          status: { type: "integer" },
+          subject_entity_id: { type: "string" },
+          page_size: { type: "integer", default: 50 },
+          page_token: { type: "string" },
+        },
+      },
+    },
+  },
+  async (req) => {
+    return decisionClient.listWorkflows({
+      status: req.query.status || 0,
+      subjectEntityId: req.query.subject_entity_id || "",
+      pageSize: req.query.page_size || 50,
+      pageToken: req.query.page_token || "",
+    });
+  }
+);
+
+app.post<{
+  Body: {
+    workflow_id: string;
+    reviewer_id: string;
+    vote: number;
+    reasoning?: string;
+    confidence?: number;
+    time_spent_seconds?: number;
+  };
+}>(
+  "/v1/decisions/votes",
+  {
+    schema: {
+      tags: ["decisions"],
+      body: {
+        type: "object",
+        required: ["workflow_id", "reviewer_id", "vote"],
+        properties: {
+          workflow_id: { type: "string" },
+          reviewer_id: { type: "string" },
+          vote: { type: "integer", minimum: 1, maximum: 4 },
+          reasoning: { type: "string" },
+          confidence: { type: "number" },
+          time_spent_seconds: { type: "integer" },
+        },
+      },
+    },
+  },
+  async (req) => {
+    return decisionClient.submitVote({
+      workflowId: req.body.workflow_id,
+      reviewerId: req.body.reviewer_id,
+      vote: req.body.vote,
+      reasoning: req.body.reasoning || "",
+      confidence: req.body.confidence || 0,
+      timeSpentSeconds: req.body.time_spent_seconds || 0,
+    });
+  }
+);
+
+app.get<{ Params: { workflowId: string }; Querystring: { reviewer_id: string } }>(
+  "/v1/decisions/workflows/:workflowId/blind-case",
+  {
+    schema: {
+      tags: ["decisions"],
+      params: {
+        type: "object",
+        properties: { workflowId: { type: "string" } },
+      },
+      querystring: {
+        type: "object",
+        required: ["reviewer_id"],
+        properties: { reviewer_id: { type: "string" } },
+      },
+    },
+  },
+  async (req) => {
+    return decisionClient.getBlindCase({
+      workflowId: req.params.workflowId,
+      reviewerId: req.query.reviewer_id,
+    });
+  }
+);
+
+app.get<{ Params: { reviewerId: string } }>(
+  "/v1/decisions/reviewers/:reviewerId/integrity",
+  {
+    schema: {
+      tags: ["decisions"],
+      params: {
+        type: "object",
+        properties: { reviewerId: { type: "string" } },
+      },
+    },
+  },
+  async (req) => {
+    return decisionClient.getReviewerIntegrity({ reviewerId: req.params.reviewerId });
   }
 );
 

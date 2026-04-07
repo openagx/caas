@@ -215,6 +215,24 @@ services:
     profiles:
       - app
 
+  decision-service:
+    build:
+      context: .
+      dockerfile: infra/docker/decision-service.Dockerfile
+    ports:
+      - "50055:50055"
+    environment:
+      DECISION_PORT: "50055"
+      DATABASE_URL: postgres://caas:caas_dev@postgres:5432/caas
+      KAFKA_BROKERS: redpanda:9092
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    profiles:
+      - app
+
   api-gateway:
     build:
       context: .
@@ -227,11 +245,13 @@ services:
       AUTHZ_ENDPOINT: authz-engine:50051
       TRUST_ENDPOINT: trust-engine:50053
       FRAUD_URL: http://fraud-pipeline:50054
+      DECISION_ENDPOINT: decision-service:50055
     depends_on:
       - authz-engine
       - entity-service
       - trust-engine
       - fraud-pipeline
+      - decision-service
     profiles:
       - app
 

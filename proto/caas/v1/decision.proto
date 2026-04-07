@@ -1,0 +1,147 @@
+syntax = "proto3";
+
+package caas.v1;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+
+option go_package = "github.com/OpenAGX/caas/gen/go/caas/v1;caasv1";
+
+// --- Enums ---
+
+enum WorkflowStatus {
+  WORKFLOW_STATUS_UNSPECIFIED = 0;
+  WORKFLOW_STATUS_PENDING = 1;
+  WORKFLOW_STATUS_IN_REVIEW = 2;
+  WORKFLOW_STATUS_APPROVED = 3;
+  WORKFLOW_STATUS_REJECTED = 4;
+  WORKFLOW_STATUS_ESCALATED = 5;
+}
+
+enum VoteType {
+  VOTE_TYPE_UNSPECIFIED = 0;
+  VOTE_TYPE_APPROVE = 1;
+  VOTE_TYPE_REJECT = 2;
+  VOTE_TYPE_ESCALATE = 3;
+  VOTE_TYPE_ABSTAIN = 4;
+}
+
+// --- Messages ---
+
+message DecisionWorkflow {
+  string id = 1;
+  string workflow_type = 2;
+  int32 required_approvals = 3;
+  int32 total_reviewers = 4;
+  bool blind_review = 5;
+  int32 cool_off_hours = 6;
+  WorkflowStatus status = 7;
+  string subject_entity_id = 8;
+  google.protobuf.Struct case_data = 9;
+  string outcome = 10;
+  google.protobuf.Timestamp created_at = 11;
+  google.protobuf.Timestamp completed_at = 12;
+  repeated DecisionVote votes = 13;
+}
+
+message DecisionVote {
+  string id = 1;
+  string workflow_id = 2;
+  string reviewer_id = 3;
+  VoteType vote = 4;
+  string reasoning = 5;
+  float confidence = 6;
+  int32 time_spent_seconds = 7;
+  string blind_case_id = 8;
+  google.protobuf.Timestamp created_at = 9;
+}
+
+message ReviewerIntegrity {
+  string reviewer_id = 1;
+  int32 integrity_score = 2;
+  int32 total_reviews = 3;
+  float approval_rate = 4;
+  float avg_time_per_review = 5;
+  int32 bias_flags = 6;
+  google.protobuf.Timestamp last_bias_check = 7;
+}
+
+// --- RPCs ---
+
+message CreateWorkflowRequest {
+  string workflow_type = 1;
+  string subject_entity_id = 2;
+  google.protobuf.Struct case_data = 3;
+  int32 required_approvals = 4;
+  int32 total_reviewers = 5;
+  bool blind_review = 6;
+  int32 cool_off_hours = 7;
+}
+
+message CreateWorkflowResponse {
+  DecisionWorkflow workflow = 1;
+}
+
+message GetWorkflowRequest {
+  string id = 1;
+}
+
+message GetWorkflowResponse {
+  DecisionWorkflow workflow = 1;
+}
+
+message ListWorkflowsRequest {
+  WorkflowStatus status = 1;
+  string subject_entity_id = 2;
+  int32 page_size = 3;
+  string page_token = 4;
+}
+
+message ListWorkflowsResponse {
+  repeated DecisionWorkflow workflows = 1;
+  string next_page_token = 2;
+}
+
+message SubmitVoteRequest {
+  string workflow_id = 1;
+  string reviewer_id = 2;
+  VoteType vote = 3;
+  string reasoning = 4;
+  float confidence = 5;
+  int32 time_spent_seconds = 6;
+}
+
+message SubmitVoteResponse {
+  DecisionVote vote = 1;
+  DecisionWorkflow workflow = 2;
+}
+
+message GetReviewerIntegrityRequest {
+  string reviewer_id = 1;
+}
+
+message GetReviewerIntegrityResponse {
+  ReviewerIntegrity integrity = 1;
+}
+
+message GetBlindCaseRequest {
+  string workflow_id = 1;
+  string reviewer_id = 2;
+}
+
+message GetBlindCaseResponse {
+  string blind_case_id = 1;
+  google.protobuf.Struct redacted_case_data = 2;
+  string workflow_type = 3;
+  int32 required_approvals = 4;
+  int32 votes_received = 5;
+}
+
+service DecisionService {
+  rpc CreateWorkflow(CreateWorkflowRequest) returns (CreateWorkflowResponse);
+  rpc GetWorkflow(GetWorkflowRequest) returns (GetWorkflowResponse);
+  rpc ListWorkflows(ListWorkflowsRequest) returns (ListWorkflowsResponse);
+  rpc SubmitVote(SubmitVoteRequest) returns (SubmitVoteResponse);
+  rpc GetBlindCase(GetBlindCaseRequest) returns (GetBlindCaseResponse);
+  rpc GetReviewerIntegrity(GetReviewerIntegrityRequest) returns (GetReviewerIntegrityResponse);
+}

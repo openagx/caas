@@ -68,6 +68,24 @@ export function createTrustClient(endpoint: string) {
   };
 }
 
+// Decision Service client
+export function createDecisionClient(endpoint: string) {
+  const proto = loadProto("caas/v1/decision.proto") as any;
+  const DecisionService = proto.caas.v1.DecisionService;
+  const client = new DecisionService(
+    endpoint,
+    grpc.credentials.createInsecure()
+  );
+  return {
+    createWorkflow: promisify(client, "createWorkflow"),
+    getWorkflow: promisify(client, "getWorkflow"),
+    listWorkflows: promisify(client, "listWorkflows"),
+    submitVote: promisify(client, "submitVote"),
+    getBlindCase: promisify(client, "getBlindCase"),
+    getReviewerIntegrity: promisify(client, "getReviewerIntegrity"),
+  };
+}
+
 // Authorization Service client
 export function createAuthzClient(endpoint: string) {
   const proto = loadProto("caas/v1/authorization.proto") as any;
