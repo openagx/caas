@@ -1,0 +1,35 @@
+export { CaasClient, CaasError } from "./client.js";
+export type { CaasClientOptions } from "./client.js";
+export {
+  EntityType,
+  LifecycleState,
+  WorkflowStatus,
+  VoteType,
+  SovereignNodeStatus,
+  TreatyStatus,
+  AuthorityTier,
+} from "./types.js";
+export type {
+  Entity,
+  ObjectReference,
+  CheckResult,
+  Relationship,
+  TrustScore,
+  TrustDimensions,
+  TrustVerification,
+  TrustAttestation,
+  Endorsement,
+  TrustGraphNode,
+  TrustGraphEdge,
+  FraudIncident,
+  FraudTimelineEntry,
+  FraudMetrics,
+  DecisionWorkflow,
+  DecisionVote,
+  ReviewerIntegrity,
+  SovereignNode,
+  Treaty,
+  AuthorityOverride,
+  VerifiableCredential,
+  PaginatedResponse,
+} from "./types.js";

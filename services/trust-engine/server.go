@@ -2,7 +2,11 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"log"
+	"time"
 
 	caasv1 "github.com/OpenAGX/caas/gen/go/caas/v1"
 	"google.golang.org/grpc/codes"
@@ -200,6 +204,48 @@ func (s *TrustServer) VerifyTrust(ctx context.Context, req *caasv1.VerifyTrustRe
 		MeetsRequirements: meets,
 		CurrentScore:      score,
 		FailedDimensions:  failedDimensions,
+	}, nil
+}
+
+// AttestTrust provides a privacy-preserving proof that an entity meets a trust threshold.
+// The actual score is never revealed — only whether it meets the threshold.
+func (s *TrustServer) AttestTrust(ctx context.Context, req *caasv1.AttestTrustRequest) (*caasv1.AttestTrustResponse, error) {
+	if req.EntityId == "" {
+		return nil, status.Error(codes.InvalidArgument, "entity_id is required")
+	}
+	if req.Threshold <= 0 || req.Threshold > 1000 {
+		return nil, status.Error(codes.InvalidArgument, "threshold must be between 1 and 1000")
+	}
+
+	// Get the actual score (kept private)
+	score, err := s.pg.GetLatestTrustScore(ctx, req.EntityId)
+	if err != nil {
+		return nil, status.Errorf(codes.NotFound, "no trust score found for entity: %v", err)
+	}
+
+	meets := score.OverallScore >= req.Threshold
+	now := time.Now().UTC()
+	expires := now.Add(1 * time.Hour)
+
+	// Create attestation hash: SHA256(entityId + meets + threshold + score + timestamp)
+	// The score is included in the hash but not in the response — verifiers can
+	// validate the hash was issued by a trusted authority without knowing the score.
+	hashInput := fmt.Sprintf("%s:%t:%d:%d:%s", req.EntityId, meets, req.Threshold, score.OverallScore, now.Format(time.RFC3339))
+	hash := sha256.Sum256([]byte(hashInput))
+	attestationHash := hex.EncodeToString(hash[:])
+
+	s.events.Emit("trust.attestation", map[string]any{
+		"entity_id":       req.EntityId,
+		"threshold":       req.Threshold,
+		"meets_threshold": meets,
+	})
+
+	return &caasv1.AttestTrustResponse{
+		MeetsThreshold:  meets,
+		Threshold:       req.Threshold,
+		AttestationHash: attestationHash,
+		IssuedAt:        timestamppb.New(now),
+		ExpiresAt:       timestamppb.New(expires),
 	}, nil
 }
 

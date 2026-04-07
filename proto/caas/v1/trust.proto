@@ -122,6 +122,21 @@ message VerifyTrustResponse {
   repeated string failed_dimensions = 3;
 }
 
+// --- Privacy-Preserving Trust Attestation ---
+
+message AttestTrustRequest {
+  string entity_id = 1;
+  int32 threshold = 2;              // Minimum trust score to attest
+}
+
+message AttestTrustResponse {
+  bool meets_threshold = 1;
+  int32 threshold = 2;
+  string attestation_hash = 3;      // SHA256(entity_id + meets + threshold + score + timestamp)
+  google.protobuf.Timestamp issued_at = 4;
+  google.protobuf.Timestamp expires_at = 5;  // Attestation valid for 1 hour
+}
+
 // TrustService manages the social graph trust engine.
 service TrustService {
   rpc GetTrustScore(GetTrustScoreRequest) returns (GetTrustScoreResponse);
@@ -130,4 +145,6 @@ service TrustService {
   rpc RevokeEndorsement(RevokeEndorsementRequest) returns (RevokeEndorsementResponse);
   rpc GetTrustGraph(GetTrustGraphRequest) returns (GetTrustGraphResponse);
   rpc VerifyTrust(VerifyTrustRequest) returns (VerifyTrustResponse);
+  // Privacy-preserving: proves entity meets threshold without revealing actual score
+  rpc AttestTrust(AttestTrustRequest) returns (AttestTrustResponse);
 }

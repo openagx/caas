@@ -65,6 +65,7 @@ export function createTrustClient(endpoint: string) {
     revokeEndorsement: promisify(client, "revokeEndorsement"),
     getTrustGraph: promisify(client, "getTrustGraph"),
     verifyTrust: promisify(client, "verifyTrust"),
+    attestTrust: promisify(client, "attestTrust"),
   };
 }
 

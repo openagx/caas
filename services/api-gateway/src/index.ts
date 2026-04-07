@@ -592,6 +592,31 @@ app.post<{
   }
 );
 
+app.post<{
+  Body: { entity_id: string; threshold: number };
+}>(
+  "/v1/trust/attest",
+  {
+    schema: {
+      tags: ["trust"],
+      body: {
+        type: "object",
+        required: ["entity_id", "threshold"],
+        properties: {
+          entity_id: { type: "string" },
+          threshold: { type: "integer", minimum: 1, maximum: 1000 },
+        },
+      },
+    },
+  },
+  async (req) => {
+    return trustClient.attestTrust({
+      entityId: req.body.entity_id,
+      threshold: req.body.threshold,
+    });
+  }
+);
+
 // --- Fraud Routes (proxy to fraud-pipeline REST API) ---
 
 app.get<{
