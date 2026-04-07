@@ -1,0 +1,317 @@
+syntax = "proto3";
+
+package caas.v1;
+
+option go_package = "github.com/OpenAGX/caas/gen/go/caas/v1;caasv1";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+
+// --- Enums ---
+
+enum SovereignNodeStatus {
+  SOVEREIGN_NODE_STATUS_UNSPECIFIED = 0;
+  SOVEREIGN_NODE_STATUS_ACTIVE = 1;
+  SOVEREIGN_NODE_STATUS_SUSPENDED = 2;
+  SOVEREIGN_NODE_STATUS_REVOKED = 3;
+}
+
+enum TreatyStatus {
+  TREATY_STATUS_UNSPECIFIED = 0;
+  TREATY_STATUS_PROPOSED = 1;
+  TREATY_STATUS_ACTIVE = 2;
+  TREATY_STATUS_SUSPENDED = 3;
+  TREATY_STATUS_TERMINATED = 4;
+}
+
+enum AuthorityTier {
+  AUTHORITY_TIER_UNSPECIFIED = 0;
+  AUTHORITY_TIER_INDIVIDUAL = 1;       // Self-service
+  AUTHORITY_TIER_INSTITUTIONAL = 2;    // Organization admin
+  AUTHORITY_TIER_REGULATORY = 3;       // Government agency
+  AUTHORITY_TIER_JUDICIAL = 4;         // Court order
+  AUTHORITY_TIER_SOVEREIGN_EMERGENCY = 5; // National security, time-limited
+}
+
+// --- Messages ---
+
+// A sovereign node in the federation (e.g., a country, jurisdiction, or org deployment)
+message SovereignNode {
+  string id = 1;
+  string name = 2;
+  string did = 3;                       // DID of this sovereign node
+  string jurisdiction = 4;              // ISO 3166-1 alpha-2 country code
+  string endpoint = 5;                  // gRPC endpoint for cross-sovereign calls
+  string public_key = 6;               // Ed25519 public key (base64)
+  SovereignNodeStatus status = 7;
+  google.protobuf.Struct metadata = 8;
+  google.protobuf.Timestamp created_at = 9;
+  google.protobuf.Timestamp updated_at = 10;
+}
+
+// Bilateral trust agreement between two sovereign nodes
+message Treaty {
+  string id = 1;
+  string source_node_id = 2;
+  string target_node_id = 3;
+  TreatyStatus status = 4;
+  float trust_weight = 5;              // 0.0–1.0, how much to weight cross-sovereign trust
+  repeated string allowed_operations = 6; // e.g., ["trust_query", "entity_lookup", "permission_check"]
+  google.protobuf.Timestamp valid_from = 7;
+  google.protobuf.Timestamp valid_until = 8;
+  google.protobuf.Timestamp created_at = 9;
+}
+
+// Result of a federated trust query
+message FederatedTrustResult {
+  string entity_id = 1;
+  string source_node_id = 2;
+  int32 trust_score = 3;               // Weighted trust from foreign sovereign
+  float confidence = 4;                // How confident the relay is (treaty weight * data quality)
+  google.protobuf.Timestamp queried_at = 5;
+  string attestation_signature = 6;    // Signed by source sovereign node
+}
+
+// Result of a federated permission check
+message FederatedPermissionResult {
+  bool allowed = 1;
+  string source_node_id = 2;
+  string checked_at_zookie = 3;
+  google.protobuf.Timestamp queried_at = 4;
+}
+
+// Authority override on a decision workflow
+message AuthorityOverride {
+  string id = 1;
+  string workflow_id = 2;
+  string authority_entity_id = 3;      // Entity performing the override
+  AuthorityTier tier = 4;
+  string justification = 5;
+  string legal_reference = 6;          // Law, court order number, etc.
+  string outcome = 7;                  // "approved" or "rejected"
+  google.protobuf.Timestamp expires_at = 8; // Tier 5 overrides are time-limited
+  google.protobuf.Timestamp created_at = 9;
+}
+
+// Verifiable Credential issued by a sovereign node
+message VerifiableCredential {
+  string id = 1;
+  string entity_id = 2;
+  string issuer_did = 3;
+  string credential_type = 4;         // e.g., "IdentityVerification", "TrustAttestation"
+  google.protobuf.Struct claims = 5;
+  string proof_signature = 6;
+  google.protobuf.Timestamp issued_at = 7;
+  google.protobuf.Timestamp expires_at = 8;
+  bool revoked = 9;
+}
+
+// --- Service ---
+
+service FederationService {
+  // Sovereign node management
+  rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse);
+  rpc GetNode(GetNodeRequest) returns (GetNodeResponse);
+  rpc ListNodes(ListNodesRequest) returns (ListNodesResponse);
+  rpc UpdateNodeStatus(UpdateNodeStatusRequest) returns (UpdateNodeStatusResponse);
+
+  // Treaty management
+  rpc ProposeTreaty(ProposeTreatyRequest) returns (ProposeTreatyResponse);
+  rpc AcceptTreaty(AcceptTreatyRequest) returns (AcceptTreatyResponse);
+  rpc GetTreaty(GetTreatyRequest) returns (GetTreatyResponse);
+  rpc ListTreaties(ListTreatiesRequest) returns (ListTreatiesResponse);
+  rpc TerminateTreaty(TerminateTreatyRequest) returns (TerminateTreatyResponse);
+
+  // Cross-sovereign queries (called by other sovereign nodes)
+  rpc FederatedTrustQuery(FederatedTrustQueryRequest) returns (FederatedTrustQueryResponse);
+  rpc FederatedPermissionCheck(FederatedPermissionCheckRequest) returns (FederatedPermissionCheckResponse);
+
+  // Authority overrides
+  rpc CreateAuthorityOverride(CreateAuthorityOverrideRequest) returns (CreateAuthorityOverrideResponse);
+  rpc GetAuthorityOverride(GetAuthorityOverrideRequest) returns (GetAuthorityOverrideResponse);
+  rpc ListAuthorityOverrides(ListAuthorityOverridesRequest) returns (ListAuthorityOverridesResponse);
+
+  // Verifiable credentials
+  rpc IssueCredential(IssueCredentialRequest) returns (IssueCredentialResponse);
+  rpc VerifyCredential(VerifyCredentialRequest) returns (VerifyCredentialResponse);
+  rpc RevokeCredential(RevokeCredentialRequest) returns (RevokeCredentialResponse);
+  rpc ListCredentials(ListCredentialsRequest) returns (ListCredentialsResponse);
+}
+
+// --- Request/Response Messages ---
+
+// Sovereign Nodes
+
+message RegisterNodeRequest {
+  string name = 1;
+  string did = 2;
+  string jurisdiction = 3;
+  string endpoint = 4;
+  string public_key = 5;
+  google.protobuf.Struct metadata = 6;
+}
+message RegisterNodeResponse {
+  SovereignNode node = 1;
+}
+
+message GetNodeRequest {
+  string node_id = 1;
+}
+message GetNodeResponse {
+  SovereignNode node = 1;
+}
+
+message ListNodesRequest {
+  SovereignNodeStatus status_filter = 1;
+  int32 page_size = 2;
+  int32 page = 3;
+}
+message ListNodesResponse {
+  repeated SovereignNode nodes = 1;
+  int32 total = 2;
+}
+
+message UpdateNodeStatusRequest {
+  string node_id = 1;
+  SovereignNodeStatus status = 2;
+}
+message UpdateNodeStatusResponse {
+  SovereignNode node = 1;
+}
+
+// Treaties
+
+message ProposeTreatyRequest {
+  string target_node_id = 1;
+  float trust_weight = 2;
+  repeated string allowed_operations = 3;
+  google.protobuf.Timestamp valid_until = 4;
+}
+message ProposeTreatyResponse {
+  Treaty treaty = 1;
+}
+
+message AcceptTreatyRequest {
+  string treaty_id = 1;
+}
+message AcceptTreatyResponse {
+  Treaty treaty = 1;
+}
+
+message GetTreatyRequest {
+  string treaty_id = 1;
+}
+message GetTreatyResponse {
+  Treaty treaty = 1;
+}
+
+message ListTreatiesRequest {
+  string node_id = 1;
+  TreatyStatus status_filter = 2;
+  int32 page_size = 3;
+  int32 page = 4;
+}
+message ListTreatiesResponse {
+  repeated Treaty treaties = 1;
+  int32 total = 2;
+}
+
+message TerminateTreatyRequest {
+  string treaty_id = 1;
+  string reason = 2;
+}
+message TerminateTreatyResponse {
+  Treaty treaty = 1;
+}
+
+// Federated Queries
+
+message FederatedTrustQueryRequest {
+  string entity_id = 1;
+  string requesting_node_id = 2;
+}
+message FederatedTrustQueryResponse {
+  FederatedTrustResult result = 1;
+}
+
+message FederatedPermissionCheckRequest {
+  string subject = 1;
+  string permission = 2;
+  string resource = 3;
+  string requesting_node_id = 4;
+}
+message FederatedPermissionCheckResponse {
+  FederatedPermissionResult result = 1;
+}
+
+// Authority Overrides
+
+message CreateAuthorityOverrideRequest {
+  string workflow_id = 1;
+  string authority_entity_id = 2;
+  AuthorityTier tier = 3;
+  string justification = 4;
+  string legal_reference = 5;
+  string outcome = 6;
+  google.protobuf.Timestamp expires_at = 7;
+}
+message CreateAuthorityOverrideResponse {
+  AuthorityOverride override = 1;
+}
+
+message GetAuthorityOverrideRequest {
+  string override_id = 1;
+}
+message GetAuthorityOverrideResponse {
+  AuthorityOverride override = 1;
+}
+
+message ListAuthorityOverridesRequest {
+  string workflow_id = 1;
+  int32 page_size = 2;
+  int32 page = 3;
+}
+message ListAuthorityOverridesResponse {
+  repeated AuthorityOverride overrides = 1;
+  int32 total = 2;
+}
+
+// Verifiable Credentials
+
+message IssueCredentialRequest {
+  string entity_id = 1;
+  string credential_type = 2;
+  google.protobuf.Struct claims = 3;
+  google.protobuf.Timestamp expires_at = 4;
+}
+message IssueCredentialResponse {
+  VerifiableCredential credential = 1;
+}
+
+message VerifyCredentialRequest {
+  string credential_id = 1;
+}
+message VerifyCredentialResponse {
+  bool valid = 1;
+  string reason = 2;
+  VerifiableCredential credential = 3;
+}
+
+message RevokeCredentialRequest {
+  string credential_id = 1;
+  string reason = 2;
+}
+message RevokeCredentialResponse {
+  VerifiableCredential credential = 1;
+}
+
+message ListCredentialsRequest {
+  string entity_id = 1;
+  string credential_type = 2;
+  int32 page_size = 3;
+  int32 page = 4;
+}
+message ListCredentialsResponse {
+  repeated VerifiableCredential credentials = 1;
+  int32 total = 2;
+}

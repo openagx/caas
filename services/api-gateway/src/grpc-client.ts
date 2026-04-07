@@ -86,6 +86,36 @@ export function createDecisionClient(endpoint: string) {
   };
 }
 
+// Federation Service client
+export function createFederationClient(endpoint: string) {
+  const proto = loadProto("caas/v1/federation.proto") as any;
+  const FederationService = proto.caas.v1.FederationService;
+  const client = new FederationService(
+    endpoint,
+    grpc.credentials.createInsecure()
+  );
+  return {
+    registerNode: promisify(client, "registerNode"),
+    getNode: promisify(client, "getNode"),
+    listNodes: promisify(client, "listNodes"),
+    updateNodeStatus: promisify(client, "updateNodeStatus"),
+    proposeTreaty: promisify(client, "proposeTreaty"),
+    acceptTreaty: promisify(client, "acceptTreaty"),
+    getTreaty: promisify(client, "getTreaty"),
+    listTreaties: promisify(client, "listTreaties"),
+    terminateTreaty: promisify(client, "terminateTreaty"),
+    federatedTrustQuery: promisify(client, "federatedTrustQuery"),
+    federatedPermissionCheck: promisify(client, "federatedPermissionCheck"),
+    createAuthorityOverride: promisify(client, "createAuthorityOverride"),
+    getAuthorityOverride: promisify(client, "getAuthorityOverride"),
+    listAuthorityOverrides: promisify(client, "listAuthorityOverrides"),
+    issueCredential: promisify(client, "issueCredential"),
+    verifyCredential: promisify(client, "verifyCredential"),
+    revokeCredential: promisify(client, "revokeCredential"),
+    listCredentials: promisify(client, "listCredentials"),
+  };
+}
+
 // Authorization Service client
 export function createAuthzClient(endpoint: string) {
   const proto = loadProto("caas/v1/authorization.proto") as any;

@@ -131,6 +131,68 @@ CREATE TABLE IF NOT EXISTS reviewer_integrity (
     UNIQUE(reviewer_id)
 );
 
+-- Federation / sovereignty tables
+CREATE TABLE IF NOT EXISTS sovereign_nodes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL,
+    did TEXT UNIQUE,
+    jurisdiction TEXT NOT NULL,
+    endpoint TEXT NOT NULL,
+    public_key TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    metadata JSONB NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_sovereign_nodes_status ON sovereign_nodes(status);
+CREATE INDEX idx_sovereign_nodes_jurisdiction ON sovereign_nodes(jurisdiction);
+
+CREATE TABLE IF NOT EXISTS treaties (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    source_node_id UUID NOT NULL REFERENCES sovereign_nodes(id),
+    target_node_id UUID NOT NULL REFERENCES sovereign_nodes(id),
+    status TEXT NOT NULL DEFAULT 'proposed',
+    trust_weight REAL NOT NULL DEFAULT 0.5,
+    allowed_operations TEXT[] NOT NULL DEFAULT '{}',
+    valid_from TIMESTAMPTZ NOT NULL DEFAULT now(),
+    valid_until TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_treaties_source ON treaties(source_node_id);
+CREATE INDEX idx_treaties_target ON treaties(target_node_id);
+CREATE INDEX idx_treaties_status ON treaties(status);
+
+CREATE TABLE IF NOT EXISTS authority_overrides (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    workflow_id UUID NOT NULL REFERENCES decision_workflows(id),
+    authority_entity_id UUID NOT NULL REFERENCES entities(id),
+    tier INTEGER NOT NULL,
+    justification TEXT NOT NULL,
+    legal_reference TEXT,
+    outcome TEXT NOT NULL,
+    expires_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_authority_overrides_workflow ON authority_overrides(workflow_id);
+
+CREATE TABLE IF NOT EXISTS verifiable_credentials (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    entity_id UUID NOT NULL REFERENCES entities(id),
+    issuer_did TEXT NOT NULL,
+    credential_type TEXT NOT NULL,
+    claims JSONB NOT NULL DEFAULT '{}',
+    proof_signature TEXT NOT NULL,
+    issued_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at TIMESTAMPTZ,
+    revoked BOOLEAN NOT NULL DEFAULT false
+);
+
+CREATE INDEX idx_vc_entity ON verifiable_credentials(entity_id);
+CREATE INDEX idx_vc_type ON verifiable_credentials(credential_type);
+
 -- Audit log (immutable)
 CREATE TABLE IF NOT EXISTS audit_log (
     id BIGSERIAL PRIMARY KEY,

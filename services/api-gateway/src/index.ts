@@ -2,7 +2,7 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
-import { createEntityClient, createAuthzClient, createTrustClient, createDecisionClient } from "./grpc-client.js";
+import { createEntityClient, createAuthzClient, createTrustClient, createDecisionClient, createFederationClient } from "./grpc-client.js";
 
 const PORT = parseInt(process.env.API_PORT || "3001", 10);
 const ENTITY_ENDPOINT = process.env.ENTITY_ENDPOINT || "localhost:50052";
@@ -10,6 +10,7 @@ const AUTHZ_ENDPOINT = process.env.AUTHZ_ENDPOINT || "localhost:50051";
 const TRUST_ENDPOINT = process.env.TRUST_ENDPOINT || "localhost:50053";
 const FRAUD_URL = process.env.FRAUD_URL || "http://localhost:50054";
 const DECISION_ENDPOINT = process.env.DECISION_ENDPOINT || "localhost:50055";
+const FEDERATION_ENDPOINT = process.env.FEDERATION_ENDPOINT || "localhost:50056";
 
 const app = Fastify({ logger: true });
 
@@ -18,6 +19,7 @@ const entityClient = createEntityClient(ENTITY_ENDPOINT);
 const authzClient = createAuthzClient(AUTHZ_ENDPOINT);
 const trustClient = createTrustClient(TRUST_ENDPOINT);
 const decisionClient = createDecisionClient(DECISION_ENDPOINT);
+const federationClient = createFederationClient(FEDERATION_ENDPOINT);
 
 // HTTP proxy helper for fraud-pipeline (REST-based service)
 async function fraudFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -51,6 +53,9 @@ await app.register(swagger, {
       { name: "trust", description: "Trust scoring, endorsements, and graph" },
       { name: "fraud", description: "Fraud detection, incidents, and simulation" },
       { name: "decisions", description: "Human decision integrity, blind review, M-of-N approval" },
+      { name: "federation", description: "Sovereign nodes, treaties, federated queries" },
+      { name: "credentials", description: "Verifiable credentials issuance and verification" },
+      { name: "authority", description: "Authority override hierarchy (5 tiers)" },
     ],
   },
 });
@@ -847,6 +852,386 @@ app.get<{ Params: { reviewerId: string } }>(
   },
   async (req) => {
     return decisionClient.getReviewerIntegrity({ reviewerId: req.params.reviewerId });
+  }
+);
+
+// --- Federation Routes ---
+
+app.post<{
+  Body: {
+    name: string;
+    did?: string;
+    jurisdiction: string;
+    endpoint: string;
+    public_key?: string;
+    metadata?: Record<string, unknown>;
+  };
+}>(
+  "/v1/federation/nodes",
+  {
+    schema: {
+      tags: ["federation"],
+      body: {
+        type: "object",
+        required: ["name", "jurisdiction", "endpoint"],
+        properties: {
+          name: { type: "string" },
+          did: { type: "string" },
+          jurisdiction: { type: "string" },
+          endpoint: { type: "string" },
+          public_key: { type: "string" },
+          metadata: { type: "object", additionalProperties: true },
+        },
+      },
+    },
+  },
+  async (req, reply) => {
+    const result = await federationClient.registerNode({
+      name: req.body.name,
+      did: req.body.did || "",
+      jurisdiction: req.body.jurisdiction,
+      endpoint: req.body.endpoint,
+      publicKey: req.body.public_key || "",
+      metadata: req.body.metadata || undefined,
+    });
+    reply.code(201).send(result);
+  }
+);
+
+app.get<{ Params: { id: string } }>(
+  "/v1/federation/nodes/:id",
+  {
+    schema: {
+      tags: ["federation"],
+      params: {
+        type: "object",
+        properties: { id: { type: "string" } },
+      },
+    },
+  },
+  async (req) => {
+    return federationClient.getNode({ nodeId: req.params.id });
+  }
+);
+
+app.get<{ Querystring: { status?: number; page_size?: number; page?: number } }>(
+  "/v1/federation/nodes",
+  {
+    schema: {
+      tags: ["federation"],
+      querystring: {
+        type: "object",
+        properties: {
+          status: { type: "integer" },
+          page_size: { type: "integer", default: 20 },
+          page: { type: "integer", default: 1 },
+        },
+      },
+    },
+  },
+  async (req) => {
+    return federationClient.listNodes({
+      statusFilter: req.query.status || 0,
+      pageSize: req.query.page_size || 20,
+      page: req.query.page || 1,
+    });
+  }
+);
+
+app.post<{
+  Body: {
+    target_node_id: string;
+    trust_weight?: number;
+    allowed_operations?: string[];
+    valid_until?: string;
+  };
+}>(
+  "/v1/federation/treaties",
+  {
+    schema: {
+      tags: ["federation"],
+      body: {
+        type: "object",
+        required: ["target_node_id"],
+        properties: {
+          target_node_id: { type: "string" },
+          trust_weight: { type: "number", default: 0.5 },
+          allowed_operations: { type: "array", items: { type: "string" } },
+          valid_until: { type: "string" },
+        },
+      },
+    },
+  },
+  async (req, reply) => {
+    const result = await federationClient.proposeTreaty({
+      targetNodeId: req.body.target_node_id,
+      trustWeight: req.body.trust_weight || 0.5,
+      allowedOperations: req.body.allowed_operations || [],
+      validUntil: req.body.valid_until ? { seconds: Math.floor(new Date(req.body.valid_until).getTime() / 1000), nanos: 0 } : undefined,
+    });
+    reply.code(201).send(result);
+  }
+);
+
+app.post<{ Params: { id: string } }>(
+  "/v1/federation/treaties/:id/accept",
+  {
+    schema: {
+      tags: ["federation"],
+      params: {
+        type: "object",
+        properties: { id: { type: "string" } },
+      },
+    },
+  },
+  async (req) => {
+    return federationClient.acceptTreaty({ treatyId: req.params.id });
+  }
+);
+
+app.get<{ Querystring: { node_id?: string; status?: number; page_size?: number; page?: number } }>(
+  "/v1/federation/treaties",
+  {
+    schema: {
+      tags: ["federation"],
+      querystring: {
+        type: "object",
+        properties: {
+          node_id: { type: "string" },
+          status: { type: "integer" },
+          page_size: { type: "integer", default: 20 },
+          page: { type: "integer", default: 1 },
+        },
+      },
+    },
+  },
+  async (req) => {
+    return federationClient.listTreaties({
+      nodeId: req.query.node_id || "",
+      statusFilter: req.query.status || 0,
+      pageSize: req.query.page_size || 20,
+      page: req.query.page || 1,
+    });
+  }
+);
+
+app.delete<{ Params: { id: string }; Body: { reason?: string } }>(
+  "/v1/federation/treaties/:id",
+  {
+    schema: {
+      tags: ["federation"],
+      params: {
+        type: "object",
+        properties: { id: { type: "string" } },
+      },
+      body: {
+        type: "object",
+        properties: { reason: { type: "string" } },
+      },
+    },
+  },
+  async (req) => {
+    return federationClient.terminateTreaty({
+      treatyId: req.params.id,
+      reason: req.body?.reason || "",
+    });
+  }
+);
+
+app.post<{
+  Body: { entity_id: string; requesting_node_id: string };
+}>(
+  "/v1/federation/trust-query",
+  {
+    schema: {
+      tags: ["federation"],
+      body: {
+        type: "object",
+        required: ["entity_id", "requesting_node_id"],
+        properties: {
+          entity_id: { type: "string" },
+          requesting_node_id: { type: "string" },
+        },
+      },
+    },
+  },
+  async (req) => {
+    return federationClient.federatedTrustQuery({
+      entityId: req.body.entity_id,
+      requestingNodeId: req.body.requesting_node_id,
+    });
+  }
+);
+
+// --- Authority Override Routes ---
+
+app.post<{
+  Body: {
+    workflow_id: string;
+    authority_entity_id: string;
+    tier: number;
+    justification: string;
+    legal_reference?: string;
+    outcome: string;
+    expires_at?: string;
+  };
+}>(
+  "/v1/authority/overrides",
+  {
+    schema: {
+      tags: ["authority"],
+      body: {
+        type: "object",
+        required: ["workflow_id", "authority_entity_id", "tier", "justification", "outcome"],
+        properties: {
+          workflow_id: { type: "string" },
+          authority_entity_id: { type: "string" },
+          tier: { type: "integer", minimum: 1, maximum: 5 },
+          justification: { type: "string" },
+          legal_reference: { type: "string" },
+          outcome: { type: "string", enum: ["approved", "rejected"] },
+          expires_at: { type: "string" },
+        },
+      },
+    },
+  },
+  async (req, reply) => {
+    const result = await federationClient.createAuthorityOverride({
+      workflowId: req.body.workflow_id,
+      authorityEntityId: req.body.authority_entity_id,
+      tier: req.body.tier,
+      justification: req.body.justification,
+      legalReference: req.body.legal_reference || "",
+      outcome: req.body.outcome,
+      expiresAt: req.body.expires_at ? { seconds: Math.floor(new Date(req.body.expires_at).getTime() / 1000), nanos: 0 } : undefined,
+    });
+    reply.code(201).send(result);
+  }
+);
+
+app.get<{ Querystring: { workflow_id?: string; page_size?: number; page?: number } }>(
+  "/v1/authority/overrides",
+  {
+    schema: {
+      tags: ["authority"],
+      querystring: {
+        type: "object",
+        properties: {
+          workflow_id: { type: "string" },
+          page_size: { type: "integer", default: 20 },
+          page: { type: "integer", default: 1 },
+        },
+      },
+    },
+  },
+  async (req) => {
+    return federationClient.listAuthorityOverrides({
+      workflowId: req.query.workflow_id || "",
+      pageSize: req.query.page_size || 20,
+      page: req.query.page || 1,
+    });
+  }
+);
+
+// --- Verifiable Credential Routes ---
+
+app.post<{
+  Body: {
+    entity_id: string;
+    credential_type: string;
+    claims?: Record<string, unknown>;
+    expires_at?: string;
+  };
+}>(
+  "/v1/credentials",
+  {
+    schema: {
+      tags: ["credentials"],
+      body: {
+        type: "object",
+        required: ["entity_id", "credential_type"],
+        properties: {
+          entity_id: { type: "string" },
+          credential_type: { type: "string" },
+          claims: { type: "object", additionalProperties: true },
+          expires_at: { type: "string" },
+        },
+      },
+    },
+  },
+  async (req, reply) => {
+    const result = await federationClient.issueCredential({
+      entityId: req.body.entity_id,
+      credentialType: req.body.credential_type,
+      claims: req.body.claims || undefined,
+      expiresAt: req.body.expires_at ? { seconds: Math.floor(new Date(req.body.expires_at).getTime() / 1000), nanos: 0 } : undefined,
+    });
+    reply.code(201).send(result);
+  }
+);
+
+app.get<{ Params: { id: string } }>(
+  "/v1/credentials/:id/verify",
+  {
+    schema: {
+      tags: ["credentials"],
+      params: {
+        type: "object",
+        properties: { id: { type: "string" } },
+      },
+    },
+  },
+  async (req) => {
+    return federationClient.verifyCredential({ credentialId: req.params.id });
+  }
+);
+
+app.post<{ Params: { id: string }; Body: { reason?: string } }>(
+  "/v1/credentials/:id/revoke",
+  {
+    schema: {
+      tags: ["credentials"],
+      params: {
+        type: "object",
+        properties: { id: { type: "string" } },
+      },
+      body: {
+        type: "object",
+        properties: { reason: { type: "string" } },
+      },
+    },
+  },
+  async (req) => {
+    return federationClient.revokeCredential({
+      credentialId: req.params.id,
+      reason: req.body?.reason || "",
+    });
+  }
+);
+
+app.get<{ Querystring: { entity_id?: string; credential_type?: string; page_size?: number; page?: number } }>(
+  "/v1/credentials",
+  {
+    schema: {
+      tags: ["credentials"],
+      querystring: {
+        type: "object",
+        properties: {
+          entity_id: { type: "string" },
+          credential_type: { type: "string" },
+          page_size: { type: "integer", default: 20 },
+          page: { type: "integer", default: 1 },
+        },
+      },
+    },
+  },
+  async (req) => {
+    return federationClient.listCredentials({
+      entityId: req.query.entity_id || "",
+      credentialType: req.query.credential_type || "",
+      pageSize: req.query.page_size || 20,
+      page: req.query.page || 1,
+    });
   }
 );
 
