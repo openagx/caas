@@ -254,6 +254,87 @@ CREATE TABLE IF NOT EXISTS quality_verifications (
 
 CREATE INDEX idx_quality_verifications_match ON quality_verifications(match_id);
 
+-- DID service tables
+CREATE TABLE IF NOT EXISTS did_documents (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    did TEXT NOT NULL UNIQUE,
+    entity_id UUID REFERENCES entities(id),
+    method TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    document JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_did_documents_entity ON did_documents(entity_id);
+CREATE INDEX idx_did_documents_method ON did_documents(method);
+CREATE INDEX idx_did_documents_status ON did_documents(status);
+
+CREATE TABLE IF NOT EXISTS did_keys (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    key_id TEXT NOT NULL UNIQUE,
+    did TEXT NOT NULL REFERENCES did_documents(did) ON DELETE CASCADE,
+    key_type TEXT NOT NULL,
+    purpose TEXT NOT NULL,
+    public_key_multibase TEXT NOT NULL,
+    public_key_jwk JSONB,
+    encrypted_private_key BYTEA NOT NULL,
+    encryption_nonce BYTEA NOT NULL,
+    rotated BOOLEAN NOT NULL DEFAULT false,
+    rotated_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_did_keys_did ON did_keys(did);
+CREATE INDEX idx_did_keys_purpose ON did_keys(purpose);
+
+CREATE TABLE IF NOT EXISTS did_verification_methods (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    vm_id TEXT NOT NULL,
+    did TEXT NOT NULL REFERENCES did_documents(did) ON DELETE CASCADE,
+    type TEXT NOT NULL,
+    controller TEXT NOT NULL,
+    public_key_multibase TEXT,
+    public_key_jwk JSONB,
+    purpose TEXT[] NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_did_vm_did ON did_verification_methods(did);
+
+CREATE TABLE IF NOT EXISTS verifiable_credentials_v2 (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    context JSONB NOT NULL,
+    type JSONB NOT NULL,
+    issuer_did TEXT NOT NULL,
+    subject_did TEXT,
+    entity_id UUID REFERENCES entities(id),
+    credential_subject JSONB NOT NULL,
+    proof JSONB NOT NULL,
+    credential_status JSONB,
+    issuance_date TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expiration_date TIMESTAMPTZ,
+    status TEXT NOT NULL DEFAULT 'active',
+    revocation_reason TEXT,
+    revoked_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_vc_v2_issuer ON verifiable_credentials_v2(issuer_did);
+CREATE INDEX idx_vc_v2_subject ON verifiable_credentials_v2(subject_did);
+CREATE INDEX idx_vc_v2_entity ON verifiable_credentials_v2(entity_id);
+CREATE INDEX idx_vc_v2_status ON verifiable_credentials_v2(status);
+
+CREATE TABLE IF NOT EXISTS verifiable_presentations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    holder_did TEXT NOT NULL,
+    credential_ids UUID[] NOT NULL,
+    proof JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_vp_holder ON verifiable_presentations(holder_did);
+
 -- Audit log (immutable)
 CREATE TABLE IF NOT EXISTS audit_log (
     id BIGSERIAL PRIMARY KEY,

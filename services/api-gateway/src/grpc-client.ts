@@ -117,6 +117,34 @@ export function createFederationClient(endpoint: string) {
   };
 }
 
+// DID Service client
+export function createDIDClient(endpoint: string) {
+  const proto = loadProto("caas/v1/did.proto") as any;
+  const DIDService = proto.caas.v1.DIDService;
+  const client = new DIDService(
+    endpoint,
+    grpc.credentials.createInsecure()
+  );
+  return {
+    createDID: promisify(client, "createDID"),
+    resolveDID: promisify(client, "resolveDID"),
+    updateDIDDocument: promisify(client, "updateDIDDocument"),
+    deactivateDID: promisify(client, "deactivateDID"),
+    listDIDs: promisify(client, "listDIDs"),
+    generateKeyPair: promisify(client, "generateKeyPair"),
+    rotateKey: promisify(client, "rotateKey"),
+    listKeys: promisify(client, "listKeys"),
+    exportPublicKey: promisify(client, "exportPublicKey"),
+    issueVerifiableCredential: promisify(client, "issueVerifiableCredential"),
+    verifyCredential: promisify(client, "verifyCredential"),
+    revokeCredential: promisify(client, "revokeCredential"),
+    getCredential: promisify(client, "getCredential"),
+    listCredentials: promisify(client, "listCredentials"),
+    createPresentation: promisify(client, "createPresentation"),
+    verifyPresentation: promisify(client, "verifyPresentation"),
+  };
+}
+
 // Surplus Service client
 export function createSurplusClient(endpoint: string) {
   const proto = loadProto("caas/v1/surplus.proto") as any;

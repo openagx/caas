@@ -1,0 +1,295 @@
+syntax = "proto3";
+
+package caas.v1;
+
+option go_package = "github.com/OpenAGX/caas/gen/go/caas/v1;caasv1";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+
+// --- Enums ---
+
+enum DIDMethod {
+  DID_METHOD_UNSPECIFIED = 0;
+  DID_METHOD_WEB = 1;
+  DID_METHOD_KEY = 2;
+}
+
+enum DIDStatus {
+  DID_STATUS_UNSPECIFIED = 0;
+  DID_STATUS_ACTIVE = 1;
+  DID_STATUS_DEACTIVATED = 2;
+}
+
+enum KeyType {
+  KEY_TYPE_UNSPECIFIED = 0;
+  KEY_TYPE_ED25519 = 1;
+  KEY_TYPE_P256 = 2;
+}
+
+enum KeyPurpose {
+  KEY_PURPOSE_UNSPECIFIED = 0;
+  KEY_PURPOSE_AUTHENTICATION = 1;
+  KEY_PURPOSE_ASSERTION = 2;
+  KEY_PURPOSE_KEY_AGREEMENT = 3;
+  KEY_PURPOSE_CAPABILITY_INVOCATION = 4;
+}
+
+enum CredentialStatus {
+  CREDENTIAL_STATUS_UNSPECIFIED = 0;
+  CREDENTIAL_STATUS_ACTIVE = 1;
+  CREDENTIAL_STATUS_REVOKED = 2;
+  CREDENTIAL_STATUS_EXPIRED = 3;
+}
+
+// --- Messages ---
+
+message DIDDocument {
+  string id = 1;                             // The DID string itself
+  string controller = 2;
+  DIDStatus status = 3;
+  string document_json = 4;                  // Full W3C DID Document JSON-LD
+  string entity_id = 5;
+  DIDMethod method = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+}
+
+message VerificationMethodMsg {
+  string id = 1;
+  string type = 2;                           // e.g., "Ed25519VerificationKey2020"
+  string controller = 3;
+  string public_key_multibase = 4;
+  string public_key_jwk = 5;                // JSON string
+}
+
+message DIDServiceEndpoint {
+  string id = 1;
+  string type = 2;
+  string service_endpoint = 3;
+}
+
+message KeyPairMsg {
+  string key_id = 1;
+  string did = 2;
+  KeyType key_type = 3;
+  KeyPurpose purpose = 4;
+  string public_key_multibase = 5;
+  string public_key_jwk = 6;                // JSON string
+  bool rotated = 7;
+  google.protobuf.Timestamp created_at = 8;
+}
+
+message VerifiableCredentialV2 {
+  string id = 1;
+  string context_json = 2;                   // JSON array string
+  string type_json = 3;                      // JSON array string
+  string issuer_did = 4;
+  string subject_did = 5;
+  string entity_id = 6;
+  google.protobuf.Struct credential_subject = 7;
+  string proof_json = 8;                     // Full proof object as JSON
+  string credential_status_json = 9;
+  google.protobuf.Timestamp issuance_date = 10;
+  google.protobuf.Timestamp expiration_date = 11;
+  CredentialStatus status = 12;
+}
+
+message VerifiablePresentationMsg {
+  string id = 1;
+  string holder_did = 2;
+  repeated string verifiable_credential_ids = 3;
+  string proof_json = 4;
+  google.protobuf.Timestamp created_at = 5;
+}
+
+// --- Service ---
+
+service DIDService {
+  // DID Operations
+  rpc CreateDID(CreateDIDRequest) returns (CreateDIDResponse);
+  rpc ResolveDID(ResolveDIDRequest) returns (ResolveDIDResponse);
+  rpc UpdateDIDDocument(UpdateDIDDocumentRequest) returns (UpdateDIDDocumentResponse);
+  rpc DeactivateDID(DeactivateDIDRequest) returns (DeactivateDIDResponse);
+  rpc ListDIDs(ListDIDsRequest) returns (ListDIDsResponse);
+
+  // Key Management
+  rpc GenerateKeyPair(GenerateKeyPairRequest) returns (GenerateKeyPairResponse);
+  rpc RotateKey(RotateKeyRequest) returns (RotateKeyResponse);
+  rpc ListKeys(ListKeysRequest) returns (ListKeysResponse);
+  rpc ExportPublicKey(ExportPublicKeyRequest) returns (ExportPublicKeyResponse);
+
+  // Verifiable Credentials
+  rpc IssueVerifiableCredential(IssueVCRequest) returns (IssueVCResponse);
+  rpc VerifyCredential(VerifyVCRequest) returns (VerifyVCResponse);
+  rpc RevokeCredential(RevokeVCRequest) returns (RevokeVCResponse);
+  rpc GetCredential(GetVCRequest) returns (GetVCResponse);
+  rpc ListCredentials(ListVCsRequest) returns (ListVCsResponse);
+
+  // Verifiable Presentations
+  rpc CreatePresentation(CreateVPRequest) returns (CreateVPResponse);
+  rpc VerifyPresentation(VerifyVPRequest) returns (VerifyVPResponse);
+}
+
+// --- Request/Response Messages ---
+
+// DID Operations
+
+message CreateDIDRequest {
+  string entity_id = 1;
+  DIDMethod method = 2;
+  KeyType key_type = 3;
+  string domain = 4;                        // For did:web (e.g., "caas.example.com")
+}
+message CreateDIDResponse {
+  DIDDocument document = 1;
+  KeyPairMsg key = 2;
+}
+
+message ResolveDIDRequest {
+  string did = 1;
+}
+message ResolveDIDResponse {
+  DIDDocument document = 1;
+  string document_json = 2;                 // Full W3C JSON-LD
+}
+
+message UpdateDIDDocumentRequest {
+  string did = 1;
+  repeated VerificationMethodMsg add_verification_methods = 2;
+  repeated string remove_verification_method_ids = 3;
+  repeated DIDServiceEndpoint add_services = 4;
+  repeated string remove_service_ids = 5;
+  repeated string add_controllers = 6;
+  repeated string remove_controllers = 7;
+}
+message UpdateDIDDocumentResponse {
+  DIDDocument document = 1;
+}
+
+message DeactivateDIDRequest {
+  string did = 1;
+  string reason = 2;
+}
+message DeactivateDIDResponse {
+  DIDDocument document = 1;
+}
+
+message ListDIDsRequest {
+  string entity_id = 1;
+  DIDMethod method_filter = 2;
+  DIDStatus status_filter = 3;
+  int32 page_size = 4;
+  int32 page = 5;
+}
+message ListDIDsResponse {
+  repeated DIDDocument documents = 1;
+  int32 total = 2;
+}
+
+// Key Management
+
+message GenerateKeyPairRequest {
+  string did = 1;
+  KeyType key_type = 2;
+  KeyPurpose purpose = 3;
+}
+message GenerateKeyPairResponse {
+  KeyPairMsg key = 1;
+}
+
+message RotateKeyRequest {
+  string key_id = 1;
+  KeyType new_key_type = 2;
+}
+message RotateKeyResponse {
+  KeyPairMsg old_key = 1;
+  KeyPairMsg new_key = 2;
+}
+
+message ListKeysRequest {
+  string did = 1;
+}
+message ListKeysResponse {
+  repeated KeyPairMsg keys = 1;
+}
+
+message ExportPublicKeyRequest {
+  string key_id = 1;
+  string format = 2;                        // "multibase" or "jwk"
+}
+message ExportPublicKeyResponse {
+  string public_key = 1;
+  string format = 2;
+}
+
+// Verifiable Credentials
+
+message IssueVCRequest {
+  string issuer_did = 1;
+  string subject_did = 2;
+  string entity_id = 3;
+  string credential_type = 4;
+  google.protobuf.Struct credential_subject = 5;
+  string signing_key_id = 6;                // Optional — uses default assertion key if empty
+  google.protobuf.Timestamp expiration_date = 7;
+}
+message IssueVCResponse {
+  VerifiableCredentialV2 credential = 1;
+}
+
+message VerifyVCRequest {
+  string credential_id = 1;                 // Verify by ID (from DB)
+  string credential_json = 2;               // Or verify raw JSON
+}
+message VerifyVCResponse {
+  bool valid = 1;
+  repeated string checks = 2;               // Results of each verification step
+  VerifiableCredentialV2 credential = 3;
+}
+
+message RevokeVCRequest {
+  string credential_id = 1;
+  string reason = 2;
+}
+message RevokeVCResponse {
+  VerifiableCredentialV2 credential = 1;
+}
+
+message GetVCRequest {
+  string credential_id = 1;
+}
+message GetVCResponse {
+  VerifiableCredentialV2 credential = 1;
+}
+
+message ListVCsRequest {
+  string entity_id = 1;
+  string issuer_did = 2;
+  CredentialStatus status_filter = 3;
+  int32 page_size = 4;
+  int32 page = 5;
+}
+message ListVCsResponse {
+  repeated VerifiableCredentialV2 credentials = 1;
+  int32 total = 2;
+}
+
+// Verifiable Presentations
+
+message CreateVPRequest {
+  string holder_did = 1;
+  repeated string credential_ids = 2;
+  string signing_key_id = 3;
+}
+message CreateVPResponse {
+  VerifiablePresentationMsg presentation = 1;
+}
+
+message VerifyVPRequest {
+  string presentation_json = 1;
+}
+message VerifyVPResponse {
+  bool valid = 1;
+  repeated string checks = 2;
+}

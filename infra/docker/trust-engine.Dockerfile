@@ -11,6 +11,7 @@ COPY services/entity-service/go.mod services/entity-service/go.sum services/enti
 COPY services/decision-service/go.mod services/decision-service/go.mod
 COPY services/federation-service/go.mod services/federation-service/go.mod
 COPY services/surplus-engine/go.mod services/surplus-engine/go.mod
+COPY services/did-service/go.mod services/did-service/go.mod
 WORKDIR /app/services/trust-engine
 RUN go mod download
 RUN CGO_ENABLED=0 go build -o /trust-engine .

@@ -269,6 +269,26 @@ services:
     profiles:
       - app
 
+  did-service:
+    build:
+      context: .
+      dockerfile: infra/docker/did-service.Dockerfile
+    ports:
+      - "50058:50058"
+    environment:
+      DID_PORT: "50058"
+      DATABASE_URL: postgres://caas:caas_dev@postgres:5432/caas
+      KAFKA_BROKERS: redpanda:9092
+      DID_KEY_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+      DID_DOMAIN: "caas.local"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    profiles:
+      - app
+
   api-gateway:
     build:
       context: .
@@ -284,6 +304,7 @@ services:
       DECISION_ENDPOINT: decision-service:50055
       FEDERATION_ENDPOINT: federation-service:50056
       SURPLUS_ENDPOINT: surplus-engine:50057
+      DID_ENDPOINT: did-service:50058
     depends_on:
       - authz-engine
       - entity-service
@@ -292,6 +313,7 @@ services:
       - decision-service
       - federation-service
       - surplus-engine
+      - did-service
     profiles:
       - app
 

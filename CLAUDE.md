@@ -27,6 +27,7 @@ CAAS is a **Zero Trust authorization infrastructure** for all digital entities. 
 | decision-service | Go | 50055 | Blind review, M-of-N approval, integrity scores |
 | federation-service | Go | 50056 | Cross-sovereign trust relay |
 | surplus-engine | Go | 50057 | Surplus/need matching |
+| did-service | Go | 50058 | W3C DID management, VCs, key management |
 | api-gateway | TypeScript | 3001 | REST/GraphQL gateway |
 
 ### Infrastructure (Docker Compose)

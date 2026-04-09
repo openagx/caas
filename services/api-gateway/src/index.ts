@@ -2,7 +2,7 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
-import { createEntityClient, createAuthzClient, createTrustClient, createDecisionClient, createFederationClient, createSurplusClient } from "./grpc-client.js";
+import { createEntityClient, createAuthzClient, createTrustClient, createDecisionClient, createFederationClient, createSurplusClient, createDIDClient } from "./grpc-client.js";
 
 const PORT = parseInt(process.env.API_PORT || "3001", 10);
 const ENTITY_ENDPOINT = process.env.ENTITY_ENDPOINT || "localhost:50052";
@@ -12,6 +12,7 @@ const FRAUD_URL = process.env.FRAUD_URL || "http://localhost:50054";
 const DECISION_ENDPOINT = process.env.DECISION_ENDPOINT || "localhost:50055";
 const FEDERATION_ENDPOINT = process.env.FEDERATION_ENDPOINT || "localhost:50056";
 const SURPLUS_ENDPOINT = process.env.SURPLUS_ENDPOINT || "localhost:50057";
+const DID_ENDPOINT = process.env.DID_ENDPOINT || "localhost:50058";
 
 const app = Fastify({ logger: true });
 
@@ -22,6 +23,7 @@ const trustClient = createTrustClient(TRUST_ENDPOINT);
 const decisionClient = createDecisionClient(DECISION_ENDPOINT);
 const federationClient = createFederationClient(FEDERATION_ENDPOINT);
 const surplusClient = createSurplusClient(SURPLUS_ENDPOINT);
+const didClient = createDIDClient(DID_ENDPOINT);
 
 // HTTP proxy helper for fraud-pipeline (REST-based service)
 async function fraudFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -59,6 +61,8 @@ await app.register(swagger, {
       { name: "credentials", description: "Verifiable credentials issuance and verification" },
       { name: "authority", description: "Authority override hierarchy (5 tiers)" },
       { name: "surplus", description: "Surplus/need listings, matching, and quality verification" },
+      { name: "did", description: "Decentralized Identifier management and resolution" },
+      { name: "vc", description: "Verifiable Credentials (W3C compliant)" },
     ],
   },
 });
@@ -1602,6 +1606,384 @@ app.get(
   },
   async () => {
     return surplusClient.getSurplusMetrics({});
+  }
+);
+
+// --- DID Routes ---
+
+app.post<{
+  Body: { entity_id: string; method: number; key_type?: number; domain?: string };
+}>(
+  "/v1/did/create",
+  {
+    schema: {
+      tags: ["did"],
+      body: {
+        type: "object",
+        required: ["entity_id", "method"],
+        properties: {
+          entity_id: { type: "string" },
+          method: { type: "integer", minimum: 1, maximum: 2 },
+          key_type: { type: "integer", minimum: 1, maximum: 2 },
+          domain: { type: "string" },
+        },
+      },
+    },
+  },
+  async (req, reply) => {
+    const result = await didClient.createDID({
+      entityId: req.body.entity_id,
+      method: req.body.method,
+      keyType: req.body.key_type || 1,
+      domain: req.body.domain || "",
+    });
+    reply.code(201).send(result);
+  }
+);
+
+app.post<{ Body: { did: string } }>(
+  "/v1/did/resolve",
+  {
+    schema: {
+      tags: ["did"],
+      body: {
+        type: "object",
+        required: ["did"],
+        properties: { did: { type: "string" } },
+      },
+    },
+  },
+  async (req) => {
+    return didClient.resolveDID({ did: req.body.did });
+  }
+);
+
+app.get<{
+  Querystring: { entity_id?: string; method_filter?: number; status_filter?: number; page_size?: number; page?: number };
+}>(
+  "/v1/did",
+  {
+    schema: {
+      tags: ["did"],
+      querystring: {
+        type: "object",
+        properties: {
+          entity_id: { type: "string" },
+          method_filter: { type: "integer" },
+          status_filter: { type: "integer" },
+          page_size: { type: "integer", default: 20 },
+          page: { type: "integer", default: 1 },
+        },
+      },
+    },
+  },
+  async (req) => {
+    return didClient.listDIDs({
+      entityId: req.query.entity_id || "",
+      methodFilter: req.query.method_filter || 0,
+      statusFilter: req.query.status_filter || 0,
+      pageSize: req.query.page_size || 20,
+      page: req.query.page || 1,
+    });
+  }
+);
+
+app.post<{ Body: { did: string; reason?: string } }>(
+  "/v1/did/deactivate",
+  {
+    schema: {
+      tags: ["did"],
+      body: {
+        type: "object",
+        required: ["did"],
+        properties: {
+          did: { type: "string" },
+          reason: { type: "string" },
+        },
+      },
+    },
+  },
+  async (req) => {
+    return didClient.deactivateDID({
+      did: req.body.did,
+      reason: req.body.reason || "",
+    });
+  }
+);
+
+app.post<{
+  Body: { did: string; key_type?: number; purpose?: number };
+}>(
+  "/v1/did/keys",
+  {
+    schema: {
+      tags: ["did"],
+      body: {
+        type: "object",
+        required: ["did"],
+        properties: {
+          did: { type: "string" },
+          key_type: { type: "integer", minimum: 1, maximum: 2 },
+          purpose: { type: "integer", minimum: 1, maximum: 4 },
+        },
+      },
+    },
+  },
+  async (req, reply) => {
+    const result = await didClient.generateKeyPair({
+      did: req.body.did,
+      keyType: req.body.key_type || 1,
+      purpose: req.body.purpose || 2,
+    });
+    reply.code(201).send(result);
+  }
+);
+
+app.post<{ Body: { key_id: string; new_key_type?: number } }>(
+  "/v1/did/keys/rotate",
+  {
+    schema: {
+      tags: ["did"],
+      body: {
+        type: "object",
+        required: ["key_id"],
+        properties: {
+          key_id: { type: "string" },
+          new_key_type: { type: "integer" },
+        },
+      },
+    },
+  },
+  async (req) => {
+    return didClient.rotateKey({
+      keyId: req.body.key_id,
+      newKeyType: req.body.new_key_type || 0,
+    });
+  }
+);
+
+app.get<{ Querystring: { did: string } }>(
+  "/v1/did/keys",
+  {
+    schema: {
+      tags: ["did"],
+      querystring: {
+        type: "object",
+        required: ["did"],
+        properties: { did: { type: "string" } },
+      },
+    },
+  },
+  async (req) => {
+    return didClient.listKeys({ did: req.query.did });
+  }
+);
+
+app.get<{ Querystring: { key_id: string; format?: string } }>(
+  "/v1/did/keys/export",
+  {
+    schema: {
+      tags: ["did"],
+      querystring: {
+        type: "object",
+        required: ["key_id"],
+        properties: {
+          key_id: { type: "string" },
+          format: { type: "string", enum: ["multibase", "jwk"], default: "multibase" },
+        },
+      },
+    },
+  },
+  async (req) => {
+    return didClient.exportPublicKey({
+      keyId: req.query.key_id,
+      format: req.query.format || "multibase",
+    });
+  }
+);
+
+// --- Verifiable Credential Routes ---
+
+app.post<{
+  Body: {
+    issuer_did: string;
+    subject_did?: string;
+    entity_id?: string;
+    credential_type: string;
+    credential_subject?: Record<string, unknown>;
+    signing_key_id?: string;
+    expiration_date?: string;
+  };
+}>(
+  "/v1/vc",
+  {
+    schema: {
+      tags: ["vc"],
+      body: {
+        type: "object",
+        required: ["issuer_did", "credential_type"],
+        properties: {
+          issuer_did: { type: "string" },
+          subject_did: { type: "string" },
+          entity_id: { type: "string" },
+          credential_type: { type: "string" },
+          credential_subject: { type: "object", additionalProperties: true },
+          signing_key_id: { type: "string" },
+          expiration_date: { type: "string" },
+        },
+      },
+    },
+  },
+  async (req, reply) => {
+    const result = await didClient.issueVerifiableCredential({
+      issuerDid: req.body.issuer_did,
+      subjectDid: req.body.subject_did || "",
+      entityId: req.body.entity_id || "",
+      credentialType: req.body.credential_type,
+      credentialSubject: req.body.credential_subject || undefined,
+      signingKeyId: req.body.signing_key_id || "",
+      expirationDate: req.body.expiration_date ? { seconds: Math.floor(new Date(req.body.expiration_date).getTime() / 1000), nanos: 0 } : undefined,
+    });
+    reply.code(201).send(result);
+  }
+);
+
+app.get<{ Params: { id: string } }>(
+  "/v1/vc/:id",
+  {
+    schema: {
+      tags: ["vc"],
+      params: {
+        type: "object",
+        properties: { id: { type: "string" } },
+      },
+    },
+  },
+  async (req) => {
+    return didClient.getCredential({ credentialId: req.params.id });
+  }
+);
+
+app.post<{ Body: { credential_id: string } }>(
+  "/v1/vc/verify",
+  {
+    schema: {
+      tags: ["vc"],
+      body: {
+        type: "object",
+        required: ["credential_id"],
+        properties: {
+          credential_id: { type: "string" },
+        },
+      },
+    },
+  },
+  async (req) => {
+    return didClient.verifyCredential({
+      credentialId: req.body.credential_id,
+    });
+  }
+);
+
+app.post<{ Params: { id: string }; Body: { reason?: string } }>(
+  "/v1/vc/:id/revoke",
+  {
+    schema: {
+      tags: ["vc"],
+      params: {
+        type: "object",
+        properties: { id: { type: "string" } },
+      },
+      body: {
+        type: "object",
+        properties: { reason: { type: "string" } },
+      },
+    },
+  },
+  async (req) => {
+    return didClient.revokeCredential({
+      credentialId: req.params.id,
+      reason: req.body?.reason || "",
+    });
+  }
+);
+
+app.get<{
+  Querystring: { entity_id?: string; issuer_did?: string; status_filter?: number; page_size?: number; page?: number };
+}>(
+  "/v1/vc",
+  {
+    schema: {
+      tags: ["vc"],
+      querystring: {
+        type: "object",
+        properties: {
+          entity_id: { type: "string" },
+          issuer_did: { type: "string" },
+          status_filter: { type: "integer" },
+          page_size: { type: "integer", default: 20 },
+          page: { type: "integer", default: 1 },
+        },
+      },
+    },
+  },
+  async (req) => {
+    return didClient.listCredentials({
+      entityId: req.query.entity_id || "",
+      issuerDid: req.query.issuer_did || "",
+      statusFilter: req.query.status_filter || 0,
+      pageSize: req.query.page_size || 20,
+      page: req.query.page || 1,
+    });
+  }
+);
+
+app.post<{
+  Body: { holder_did: string; credential_ids: string[]; signing_key_id?: string };
+}>(
+  "/v1/vp",
+  {
+    schema: {
+      tags: ["vc"],
+      body: {
+        type: "object",
+        required: ["holder_did", "credential_ids"],
+        properties: {
+          holder_did: { type: "string" },
+          credential_ids: { type: "array", items: { type: "string" } },
+          signing_key_id: { type: "string" },
+        },
+      },
+    },
+  },
+  async (req, reply) => {
+    const result = await didClient.createPresentation({
+      holderDid: req.body.holder_did,
+      credentialIds: req.body.credential_ids,
+      signingKeyId: req.body.signing_key_id || "",
+    });
+    reply.code(201).send(result);
+  }
+);
+
+app.post<{ Body: { presentation_json: string } }>(
+  "/v1/vp/verify",
+  {
+    schema: {
+      tags: ["vc"],
+      body: {
+        type: "object",
+        required: ["presentation_json"],
+        properties: {
+          presentation_json: { type: "string" },
+        },
+      },
+    },
+  },
+  async (req) => {
+    return didClient.verifyPresentation({
+      presentationJson: req.body.presentation_json,
+    });
   }
 );
 

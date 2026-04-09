@@ -6,6 +6,7 @@ use (
 	./packages/sdk-go
 	./services/authz-engine
 	./services/decision-service
+	./services/did-service
 	./services/entity-service
 	./services/federation-service
 	./services/surplus-engine
