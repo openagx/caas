@@ -22,7 +22,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.23"
+          go-version: "1.25.8"
+          cache: true
       - name: Build all services
         run: |
           for svc in services/*/; do
@@ -65,3 +66,76 @@ jobs:
         continue-on-error: true
       - run: pnpm -r test
         continue-on-error: true
+
+  smoke:
+    name: DID Smoke Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.8"
+          cache: true
+
+      - name: Start infrastructure (postgres + redpanda)
+        run: docker compose -p caas-smoke -f infra/smoke/docker-compose.smoke.yml up -d --wait
+
+      - name: Build did-service
+        working-directory: services/did-service
+        run: go build -o /tmp/did-service .
+
+      - name: Build federation-service
+        working-directory: services/federation-service
+        run: go build -o /tmp/federation-service .
+
+      - name: Start did-service
+        env:
+          DATABASE_URL: postgres://caas:caas_dev@localhost:15432/caas
+          KAFKA_BROKERS: localhost:19092
+          DID_PORT: "50058"
+          DID_DOMAIN: localhost:50058
+          DID_KEY_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        run: |
+          nohup /tmp/did-service > /tmp/did-service.log 2>&1 &
+          echo $! > /tmp/did-service.pid
+          timeout 20 bash -c 'until nc -z localhost 50058; do sleep 1; done' \
+            || { echo "did-service failed to start"; cat /tmp/did-service.log; exit 1; }
+          echo "did-service listening on :50058"
+
+      - name: Start federation-service
+        env:
+          DATABASE_URL: postgres://caas:caas_dev@localhost:15432/caas
+          KAFKA_BROKERS: localhost:19092
+          FEDERATION_PORT: "50056"
+          DID_ENDPOINT: localhost:50058
+        run: |
+          nohup /tmp/federation-service > /tmp/federation-service.log 2>&1 &
+          echo $! > /tmp/federation-service.pid
+          timeout 20 bash -c 'until nc -z localhost 50056; do sleep 1; done' \
+            || { echo "federation-service failed to start"; cat /tmp/federation-service.log; exit 1; }
+          echo "federation-service listening on :50056"
+
+      - name: Run smoke test
+        working-directory: services/did-service
+        env:
+          SMOKE_DATABASE_URL: postgres://caas:caas_dev@localhost:15432/caas
+          SMOKE_DID_ENDPOINT: localhost:50058
+          SMOKE_FEDERATION_ENDPOINT: localhost:50056
+        run: go run ./cmd/smoke
+
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          echo "=== did-service log ==="
+          cat /tmp/did-service.log || true
+          echo "=== federation-service log ==="
+          cat /tmp/federation-service.log || true
+          echo "=== docker compose logs ==="
+          docker compose -p caas-smoke -f infra/smoke/docker-compose.smoke.yml logs || true
+
+      - name: Teardown
+        if: always()
+        run: |
+          [ -f /tmp/did-service.pid ] && kill "$(cat /tmp/did-service.pid)" 2>/dev/null || true
+          [ -f /tmp/federation-service.pid ] && kill "$(cat /tmp/federation-service.pid)" 2>/dev/null || true
+          docker compose -p caas-smoke -f infra/smoke/docker-compose.smoke.yml down -v || true
