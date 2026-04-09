@@ -15,7 +15,13 @@ services/*/federation-service
 services/*/surplus-engine
 
 # Generated code
-gen/
+# Keep gen/go/go.{mod,sum} tracked so CI can buf-generate into an existing
+# module; everything else under gen/ stays ignored (actual .pb.go output).
+gen/*
+!gen/go/
+gen/go/*
+!gen/go/go.mod
+!gen/go/go.sum
 
 # Node
 node_modules/
