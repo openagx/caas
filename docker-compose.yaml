@@ -243,11 +243,14 @@ services:
       FEDERATION_PORT: "50056"
       DATABASE_URL: postgres://caas:caas_dev@postgres:5432/caas
       KAFKA_BROKERS: redpanda:9092
+      DID_ENDPOINT: did-service:50058
     depends_on:
       postgres:
         condition: service_healthy
       redpanda:
         condition: service_healthy
+      did-service:
+        condition: service_started
     profiles:
       - app
 

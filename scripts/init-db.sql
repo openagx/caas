@@ -187,11 +187,20 @@ CREATE TABLE IF NOT EXISTS verifiable_credentials (
     proof_signature TEXT NOT NULL,
     issued_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at TIMESTAMPTZ,
-    revoked BOOLEAN NOT NULL DEFAULT false
+    revoked BOOLEAN NOT NULL DEFAULT false,
+    v2_credential_id UUID
 );
 
 CREATE INDEX idx_vc_entity ON verifiable_credentials(entity_id);
 CREATE INDEX idx_vc_type ON verifiable_credentials(credential_type);
+CREATE INDEX idx_vc_v2_ref ON verifiable_credentials(v2_credential_id) WHERE v2_credential_id IS NOT NULL;
+
+-- Federation service config (stores federation issuer DID, etc.)
+CREATE TABLE IF NOT EXISTS federation_config (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 -- Surplus redistribution tables
 CREATE TABLE IF NOT EXISTS surplus_listings (
@@ -324,6 +333,11 @@ CREATE INDEX idx_vc_v2_issuer ON verifiable_credentials_v2(issuer_did);
 CREATE INDEX idx_vc_v2_subject ON verifiable_credentials_v2(subject_did);
 CREATE INDEX idx_vc_v2_entity ON verifiable_credentials_v2(entity_id);
 CREATE INDEX idx_vc_v2_status ON verifiable_credentials_v2(status);
+
+-- Add FK from legacy verifiable_credentials.v2_credential_id now that v2 table exists
+ALTER TABLE verifiable_credentials
+  ADD CONSTRAINT fk_vc_v2
+  FOREIGN KEY (v2_credential_id) REFERENCES verifiable_credentials_v2(id) ON DELETE SET NULL;
 
 CREATE TABLE IF NOT EXISTS verifiable_presentations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

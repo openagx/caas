@@ -14,17 +14,25 @@ import (
 	caasv1 "github.com/OpenAGX/caas/gen/go/caas/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type FederationServer struct {
 	caasv1.UnimplementedFederationServiceServer
-	store  *PostgresStore
-	events *EventProducer
+	store     *PostgresStore
+	events    *EventProducer
+	didClient caasv1.DIDServiceClient
+	issuerDID string
 }
 
-func NewFederationServer(store *PostgresStore, events *EventProducer) *FederationServer {
-	return &FederationServer{store: store, events: events}
+func NewFederationServer(store *PostgresStore, events *EventProducer, didClient caasv1.DIDServiceClient, issuerDID string) *FederationServer {
+	return &FederationServer{
+		store:     store,
+		events:    events,
+		didClient: didClient,
+		issuerDID: issuerDID,
+	}
 }
 
 // --- Sovereign Node Management ---
@@ -382,67 +390,132 @@ func (s *FederationServer) ListAuthorityOverrides(ctx context.Context, req *caas
 	return &caasv1.ListAuthorityOverridesResponse{Overrides: overrides, Total: int32(total)}, nil
 }
 
-// --- Verifiable Credentials ---
+// --- Verifiable Credentials (delegates to did-service for real signatures) ---
 
+// IssueCredential creates a W3C Verifiable Credential signed by the federation
+// issuer DID. Delegates signing to did-service, then mirrors the result into
+// the legacy verifiable_credentials table for backwards compatibility.
 func (s *FederationServer) IssueCredential(ctx context.Context, req *caasv1.IssueCredentialRequest) (*caasv1.IssueCredentialResponse, error) {
 	if req.EntityId == "" || req.CredentialType == "" {
 		return nil, status.Error(codes.InvalidArgument, "entity_id and credential_type are required")
 	}
 
+	// 1. Resolve or auto-create subject DID for the entity
+	subjectDID, err := s.ensureEntityDID(ctx, req.EntityId)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "ensure entity DID: %v", err)
+	}
+
+	// 2. Build credential subject from claims
+	credentialSubject := req.Claims
+	if credentialSubject == nil {
+		credentialSubject = &structpb.Struct{Fields: map[string]*structpb.Value{}}
+	}
+
+	// 3. Delegate to did-service to issue + sign the V2 credential
+	issueReq := &caasv1.IssueVCRequest{
+		IssuerDid:         s.issuerDID,
+		SubjectDid:        subjectDID,
+		EntityId:          req.EntityId,
+		CredentialType:    req.CredentialType,
+		CredentialSubject: credentialSubject,
+		ExpirationDate:    req.ExpiresAt,
+	}
+	issueResp, err := s.didClient.IssueVerifiableCredential(ctx, issueReq)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "did-service issue VC: %v", err)
+	}
+	v2 := issueResp.Credential
+	if v2 == nil {
+		return nil, status.Error(codes.Internal, "did-service returned empty credential")
+	}
+
+	// 4. Extract proof signature (proofValue) from the V2 proof JSON
+	proofSig := extractProofValue(v2.ProofJson)
+
+	// 5. Mirror into legacy verifiable_credentials table with V2 FK
+	var issuedAt time.Time
+	if v2.IssuanceDate != nil {
+		issuedAt = v2.IssuanceDate.AsTime()
+	} else {
+		issuedAt = time.Now()
+	}
 	var expiresAt *time.Time
-	if req.ExpiresAt != nil {
-		t := req.ExpiresAt.AsTime()
+	if v2.ExpirationDate != nil {
+		t := v2.ExpirationDate.AsTime()
 		expiresAt = &t
 	}
 
-	// Generate proof signature from claims
-	claimsJSON, _ := json.Marshal(req.Claims)
-	proofSig := signResult(fmt.Sprintf("%s:%s:%s", req.EntityId, req.CredentialType, string(claimsJSON)))
-
-	credential, err := s.store.IssueCredential(ctx, req.EntityId, req.CredentialType, req.Claims, proofSig, expiresAt)
+	credential, err := s.store.IssueCredential(
+		ctx,
+		req.EntityId,
+		s.issuerDID,
+		req.CredentialType,
+		req.Claims,
+		proofSig,
+		issuedAt,
+		expiresAt,
+		v2.Id,
+	)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "issue credential: %v", err)
+		return nil, status.Errorf(codes.Internal, "mirror credential to federation store: %v", err)
 	}
 
 	s.events.Emit("vc.issued", map[string]any{
-		"credential_id":   credential.Id,
-		"entity_id":       req.EntityId,
-		"credential_type": req.CredentialType,
+		"credential_id":    credential.Id,
+		"v2_credential_id": v2.Id,
+		"entity_id":        req.EntityId,
+		"credential_type":  req.CredentialType,
+		"issuer_did":       s.issuerDID,
+		"subject_did":      subjectDID,
 	})
 
 	return &caasv1.IssueCredentialResponse{Credential: credential}, nil
 }
 
+// VerifyCredential loads the legacy credential row, then delegates cryptographic
+// verification to did-service via the linked V2 credential.
 func (s *FederationServer) VerifyCredential(ctx context.Context, req *caasv1.VerifyCredentialRequest) (*caasv1.VerifyCredentialResponse, error) {
 	if req.CredentialId == "" {
 		return nil, status.Error(codes.InvalidArgument, "credential_id is required")
 	}
 
-	cred, err := s.store.GetCredential(ctx, req.CredentialId)
+	cred, v2ID, err := s.store.GetCredentialWithV2Ref(ctx, req.CredentialId)
 	if err != nil {
 		return nil, status.Errorf(codes.NotFound, "credential not found: %v", err)
 	}
 
-	// Check validity
-	if cred.Revoked {
-		return &caasv1.VerifyCredentialResponse{
-			Valid:      false,
-			Reason:     "credential has been revoked",
-			Credential: cred,
-		}, nil
+	// Legacy credentials with no V2 reference cannot be cryptographically verified.
+	// Fall back to basic revocation/expiry checks for backwards compat.
+	if v2ID == "" {
+		if cred.Revoked {
+			return &caasv1.VerifyCredentialResponse{Valid: false, Reason: "credential has been revoked (legacy, no crypto proof)", Credential: cred}, nil
+		}
+		if cred.ExpiresAt != nil && cred.ExpiresAt.AsTime().Before(time.Now()) {
+			return &caasv1.VerifyCredentialResponse{Valid: false, Reason: "credential has expired (legacy, no crypto proof)", Credential: cred}, nil
+		}
+		return &caasv1.VerifyCredentialResponse{Valid: false, Reason: "legacy credential has no cryptographic proof", Credential: cred}, nil
 	}
 
-	if cred.ExpiresAt != nil && cred.ExpiresAt.AsTime().Before(time.Now()) {
-		return &caasv1.VerifyCredentialResponse{
-			Valid:      false,
-			Reason:     "credential has expired",
-			Credential: cred,
-		}, nil
+	// Delegate to did-service for cryptographic verification
+	verifyResp, err := s.didClient.VerifyCredential(ctx, &caasv1.VerifyVCRequest{
+		CredentialId: v2ID,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "did-service verify: %v", err)
+	}
+
+	reason := "credential is cryptographically valid"
+	if !verifyResp.Valid {
+		reason = "credential verification failed"
+		if len(verifyResp.Checks) > 0 {
+			reason = verifyResp.Checks[len(verifyResp.Checks)-1]
+		}
 	}
 
 	return &caasv1.VerifyCredentialResponse{
-		Valid:      true,
-		Reason:     "credential is valid",
+		Valid:      verifyResp.Valid,
+		Reason:     reason,
 		Credential: cred,
 	}, nil
 }
@@ -452,21 +525,78 @@ func (s *FederationServer) RevokeCredential(ctx context.Context, req *caasv1.Rev
 		return nil, status.Error(codes.InvalidArgument, "credential_id is required")
 	}
 
+	cred, v2ID, err := s.store.GetCredentialWithV2Ref(ctx, req.CredentialId)
+	if err != nil {
+		return nil, status.Errorf(codes.NotFound, "credential not found: %v", err)
+	}
+
+	// Revoke in did-service first if linked, then mark legacy row
+	if v2ID != "" {
+		if _, err := s.didClient.RevokeCredential(ctx, &caasv1.RevokeVCRequest{
+			CredentialId: v2ID,
+			Reason:       req.Reason,
+		}); err != nil {
+			return nil, status.Errorf(codes.Internal, "did-service revoke: %v", err)
+		}
+	}
+
 	if err := s.store.RevokeCredential(ctx, req.CredentialId); err != nil {
 		return nil, status.Errorf(codes.Internal, "revoke credential: %v", err)
 	}
-
-	cred, err := s.store.GetCredential(ctx, req.CredentialId)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "get credential: %v", err)
-	}
+	cred.Revoked = true
 
 	s.events.Emit("vc.revoked", map[string]any{
-		"credential_id": req.CredentialId,
-		"reason":        req.Reason,
+		"credential_id":    req.CredentialId,
+		"v2_credential_id": v2ID,
+		"reason":           req.Reason,
 	})
 
 	return &caasv1.RevokeCredentialResponse{Credential: cred}, nil
+}
+
+// ensureEntityDID returns the entity's DID, auto-creating one via did-service if missing.
+func (s *FederationServer) ensureEntityDID(ctx context.Context, entityID string) (string, error) {
+	did, err := s.store.GetEntityDID(ctx, entityID)
+	if err != nil {
+		return "", fmt.Errorf("lookup entity DID: %w", err)
+	}
+	if did != "" {
+		return did, nil
+	}
+
+	// Entity has no DID — create one via did-service (did:key, Ed25519)
+	// did-service is responsible for updating entities.did via its own DB connection.
+	resp, err := s.didClient.CreateDID(ctx, &caasv1.CreateDIDRequest{
+		EntityId: entityID,
+		Method:   caasv1.DIDMethod_DID_METHOD_KEY,
+		KeyType:  caasv1.KeyType_KEY_TYPE_ED25519,
+	})
+	if err != nil {
+		return "", fmt.Errorf("create entity DID: %w", err)
+	}
+	if resp.Document == nil || resp.Document.Id == "" {
+		return "", fmt.Errorf("did-service returned empty DID document")
+	}
+	return resp.Document.Id, nil
+}
+
+// extractProofValue pulls the proofValue field out of a W3C proof JSON object.
+// Returns empty string if parsing fails — proof is still stored in V2 row.
+func extractProofValue(proofJSON string) string {
+	if proofJSON == "" {
+		return ""
+	}
+	var proof map[string]any
+	if err := json.Unmarshal([]byte(proofJSON), &proof); err != nil {
+		return ""
+	}
+	if v, ok := proof["proofValue"].(string); ok {
+		return v
+	}
+	if v, ok := proof["jws"].(string); ok {
+		return v
+	}
+	return ""
 }
 
 func (s *FederationServer) ListCredentials(ctx context.Context, req *caasv1.ListCredentialsRequest) (*caasv1.ListCredentialsResponse, error) {

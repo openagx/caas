@@ -424,12 +424,16 @@ func (s *PostgresStore) ListAuthorityOverrides(ctx context.Context, workflowID s
 
 // --- Verifiable Credentials ---
 
+// IssueCredential inserts a federation-level VC row that mirrors a V2 credential
+// created via did-service. v2CredentialID links back to verifiable_credentials_v2.
 func (s *PostgresStore) IssueCredential(
 	ctx context.Context,
-	entityID, credentialType string,
+	entityID, issuerDID, credentialType string,
 	claims *structpb.Struct,
 	proofSignature string,
+	issuedAt time.Time,
 	expiresAt *time.Time,
+	v2CredentialID string,
 ) (*caasv1.VerifiableCredential, error) {
 	var claimsJSON []byte
 	if claims != nil {
@@ -438,20 +442,16 @@ func (s *PostgresStore) IssueCredential(
 		claimsJSON = []byte("{}")
 	}
 
-	// Get issuer DID (for MVP, derive from entity)
-	issuerDID := fmt.Sprintf("did:web:caas.local:issuer")
-
 	row := s.pool.QueryRow(ctx,
 		`INSERT INTO verifiable_credentials
-		 (entity_id, issuer_did, credential_type, claims, proof_signature, expires_at)
-		 VALUES ($1, $2, $3, $4, $5, $6)
-		 RETURNING id, issued_at`,
-		entityID, issuerDID, credentialType, claimsJSON, proofSignature, expiresAt,
+		 (entity_id, issuer_did, credential_type, claims, proof_signature, issued_at, expires_at, v2_credential_id)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		 RETURNING id`,
+		entityID, issuerDID, credentialType, claimsJSON, proofSignature, issuedAt, expiresAt, v2CredentialID,
 	)
 
 	var id string
-	var issuedAt time.Time
-	if err := row.Scan(&id, &issuedAt); err != nil {
+	if err := row.Scan(&id); err != nil {
 		return nil, err
 	}
 
@@ -471,10 +471,11 @@ func (s *PostgresStore) IssueCredential(
 	return cred, nil
 }
 
-func (s *PostgresStore) GetCredential(ctx context.Context, id string) (*caasv1.VerifiableCredential, error) {
+// GetCredentialWithV2Ref returns the credential along with its linked V2 credential ID (if any).
+func (s *PostgresStore) GetCredentialWithV2Ref(ctx context.Context, id string) (*caasv1.VerifiableCredential, string, error) {
 	row := s.pool.QueryRow(ctx,
 		`SELECT id, entity_id, issuer_did, credential_type, claims,
-		        proof_signature, issued_at, expires_at, revoked
+		        proof_signature, issued_at, expires_at, revoked, COALESCE(v2_credential_id::text, '')
 		 FROM verifiable_credentials WHERE id = $1`, id,
 	)
 
@@ -482,12 +483,13 @@ func (s *PostgresStore) GetCredential(ctx context.Context, id string) (*caasv1.V
 	var claimsJSON []byte
 	var issuedAt time.Time
 	var expiresAt *time.Time
+	var v2ID string
 
 	if err := row.Scan(
 		&cred.Id, &cred.EntityId, &cred.IssuerDid, &cred.CredentialType,
-		&claimsJSON, &cred.ProofSignature, &issuedAt, &expiresAt, &cred.Revoked,
+		&claimsJSON, &cred.ProofSignature, &issuedAt, &expiresAt, &cred.Revoked, &v2ID,
 	); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	cred.IssuedAt = timestamppb.New(issuedAt)
@@ -501,7 +503,52 @@ func (s *PostgresStore) GetCredential(ctx context.Context, id string) (*caasv1.V
 		}
 	}
 
-	return &cred, nil
+	return &cred, v2ID, nil
+}
+
+func (s *PostgresStore) GetCredential(ctx context.Context, id string) (*caasv1.VerifiableCredential, error) {
+	cred, _, err := s.GetCredentialWithV2Ref(ctx, id)
+	return cred, err
+}
+
+// --- Entity DID lookup (federation reads entities.did directly) ---
+
+// GetEntityDID returns the DID for an entity, or empty string if the entity has none.
+func (s *PostgresStore) GetEntityDID(ctx context.Context, entityID string) (string, error) {
+	var did *string
+	err := s.pool.QueryRow(ctx,
+		`SELECT did FROM entities WHERE id = $1`, entityID,
+	).Scan(&did)
+	if err != nil {
+		return "", err
+	}
+	if did == nil {
+		return "", nil
+	}
+	return *did, nil
+}
+
+// --- Federation config (key/value store for federation-level settings) ---
+
+func (s *PostgresStore) GetFederationConfig(ctx context.Context, key string) (string, error) {
+	var value string
+	err := s.pool.QueryRow(ctx,
+		`SELECT value FROM federation_config WHERE key = $1`, key,
+	).Scan(&value)
+	if err != nil {
+		return "", err
+	}
+	return value, nil
+}
+
+func (s *PostgresStore) SetFederationConfig(ctx context.Context, key, value string) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO federation_config (key, value, updated_at)
+		 VALUES ($1, $2, now())
+		 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+		key, value,
+	)
+	return err
 }
 
 func (s *PostgresStore) RevokeCredential(ctx context.Context, id string) error {
