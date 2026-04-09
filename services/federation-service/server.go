@@ -413,7 +413,7 @@ func (s *FederationServer) IssueCredential(ctx context.Context, req *caasv1.Issu
 	}
 
 	// 3. Delegate to did-service to issue + sign the V2 credential
-	issueReq := &caasv1.IssueVCRequest{
+	issueReq := &caasv1.DIDServiceIssueVerifiableCredentialRequest{
 		IssuerDid:         s.issuerDID,
 		SubjectDid:        subjectDID,
 		EntityId:          req.EntityId,
@@ -498,7 +498,7 @@ func (s *FederationServer) VerifyCredential(ctx context.Context, req *caasv1.Ver
 	}
 
 	// Delegate to did-service for cryptographic verification
-	verifyResp, err := s.didClient.VerifyCredential(ctx, &caasv1.VerifyVCRequest{
+	verifyResp, err := s.didClient.VerifyCredential(ctx, &caasv1.DIDServiceVerifyCredentialRequest{
 		CredentialId: v2ID,
 	})
 	if err != nil {
@@ -532,7 +532,7 @@ func (s *FederationServer) RevokeCredential(ctx context.Context, req *caasv1.Rev
 
 	// Revoke in did-service first if linked, then mark legacy row
 	if v2ID != "" {
-		if _, err := s.didClient.RevokeCredential(ctx, &caasv1.RevokeVCRequest{
+		if _, err := s.didClient.RevokeCredential(ctx, &caasv1.DIDServiceRevokeCredentialRequest{
 			CredentialId: v2ID,
 			Reason:       req.Reason,
 		}); err != nil {

@@ -106,7 +106,7 @@ func main() {
 		"role":           "smoke-tester",
 		"clearanceLevel": 3,
 	})
-	issueResp, err := didClient.IssueVerifiableCredential(ctx, &caasv1.IssueVCRequest{
+	issueResp, err := didClient.IssueVerifiableCredential(ctx, &caasv1.DIDServiceIssueVerifiableCredentialRequest{
 		IssuerDid:         subjectDID, // self-issued for this test
 		SubjectDid:        subjectDID,
 		EntityId:          entityID,
@@ -141,7 +141,7 @@ func main() {
 
 	// --- VerifyCredential via did-service ---
 	log.Println("[5/7] Calling did.VerifyCredential...")
-	verifyResp, err := didClient.VerifyCredential(ctx, &caasv1.VerifyVCRequest{
+	verifyResp, err := didClient.VerifyCredential(ctx, &caasv1.DIDServiceVerifyCredentialRequest{
 		CredentialId: v2.Id,
 	})
 	if err != nil {

@@ -10,10 +10,6 @@ jobs:
   proto-lint:
     name: Lint Protobuf
     runs-on: ubuntu-latest
-    # TODO: rename IssueVCRequest/VerifyVCRequest/etc. in did.proto to satisfy
-    # buf STANDARD lint (RPC_REQUEST_STANDARD_NAME). Currently non-blocking so
-    # Go build and smoke jobs can gate merges until the proto rename lands.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: bufbuild/buf-setup-action@v1

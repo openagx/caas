@@ -120,15 +120,15 @@ service DIDService {
   rpc ExportPublicKey(ExportPublicKeyRequest) returns (ExportPublicKeyResponse);
 
   // Verifiable Credentials
-  rpc IssueVerifiableCredential(IssueVCRequest) returns (IssueVCResponse);
-  rpc VerifyCredential(VerifyVCRequest) returns (VerifyVCResponse);
-  rpc RevokeCredential(RevokeVCRequest) returns (RevokeVCResponse);
-  rpc GetCredential(GetVCRequest) returns (GetVCResponse);
-  rpc ListCredentials(ListVCsRequest) returns (ListVCsResponse);
+  rpc IssueVerifiableCredential(DIDServiceIssueVerifiableCredentialRequest) returns (DIDServiceIssueVerifiableCredentialResponse);
+  rpc VerifyCredential(DIDServiceVerifyCredentialRequest) returns (DIDServiceVerifyCredentialResponse);
+  rpc RevokeCredential(DIDServiceRevokeCredentialRequest) returns (DIDServiceRevokeCredentialResponse);
+  rpc GetCredential(DIDServiceGetCredentialRequest) returns (DIDServiceGetCredentialResponse);
+  rpc ListCredentials(DIDServiceListCredentialsRequest) returns (DIDServiceListCredentialsResponse);
 
   // Verifiable Presentations
-  rpc CreatePresentation(CreateVPRequest) returns (CreateVPResponse);
-  rpc VerifyPresentation(VerifyVPRequest) returns (VerifyVPResponse);
+  rpc CreatePresentation(DIDServiceCreatePresentationRequest) returns (DIDServiceCreatePresentationResponse);
+  rpc VerifyPresentation(DIDServiceVerifyPresentationRequest) returns (DIDServiceVerifyPresentationResponse);
 }
 
 // --- Request/Response Messages ---
@@ -225,7 +225,7 @@ message ExportPublicKeyResponse {
 
 // Verifiable Credentials
 
-message IssueVCRequest {
+message DIDServiceIssueVerifiableCredentialRequest {
   string issuer_did = 1;
   string subject_did = 2;
   string entity_id = 3;
@@ -234,62 +234,62 @@ message IssueVCRequest {
   string signing_key_id = 6;                // Optional — uses default assertion key if empty
   google.protobuf.Timestamp expiration_date = 7;
 }
-message IssueVCResponse {
+message DIDServiceIssueVerifiableCredentialResponse {
   VerifiableCredentialV2 credential = 1;
 }
 
-message VerifyVCRequest {
+message DIDServiceVerifyCredentialRequest {
   string credential_id = 1;                 // Verify by ID (from DB)
   string credential_json = 2;               // Or verify raw JSON
 }
-message VerifyVCResponse {
+message DIDServiceVerifyCredentialResponse {
   bool valid = 1;
   repeated string checks = 2;               // Results of each verification step
   VerifiableCredentialV2 credential = 3;
 }
 
-message RevokeVCRequest {
+message DIDServiceRevokeCredentialRequest {
   string credential_id = 1;
   string reason = 2;
 }
-message RevokeVCResponse {
+message DIDServiceRevokeCredentialResponse {
   VerifiableCredentialV2 credential = 1;
 }
 
-message GetVCRequest {
+message DIDServiceGetCredentialRequest {
   string credential_id = 1;
 }
-message GetVCResponse {
+message DIDServiceGetCredentialResponse {
   VerifiableCredentialV2 credential = 1;
 }
 
-message ListVCsRequest {
+message DIDServiceListCredentialsRequest {
   string entity_id = 1;
   string issuer_did = 2;
   CredentialStatus status_filter = 3;
   int32 page_size = 4;
   int32 page = 5;
 }
-message ListVCsResponse {
+message DIDServiceListCredentialsResponse {
   repeated VerifiableCredentialV2 credentials = 1;
   int32 total = 2;
 }
 
 // Verifiable Presentations
 
-message CreateVPRequest {
+message DIDServiceCreatePresentationRequest {
   string holder_did = 1;
   repeated string credential_ids = 2;
   string signing_key_id = 3;
 }
-message CreateVPResponse {
+message DIDServiceCreatePresentationResponse {
   VerifiablePresentationMsg presentation = 1;
 }
 
-message VerifyVPRequest {
+message DIDServiceVerifyPresentationRequest {
   string presentation_json = 1;
 }
-message VerifyVPResponse {
+message DIDServiceVerifyPresentationResponse {
   bool valid = 1;
   repeated string checks = 2;
 }

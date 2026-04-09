@@ -449,7 +449,7 @@ func (s *DIDServer) ExportPublicKey(ctx context.Context, req *caasv1.ExportPubli
 
 // --- Verifiable Credentials ---
 
-func (s *DIDServer) IssueVerifiableCredential(ctx context.Context, req *caasv1.IssueVCRequest) (*caasv1.IssueVCResponse, error) {
+func (s *DIDServer) IssueVerifiableCredential(ctx context.Context, req *caasv1.DIDServiceIssueVerifiableCredentialRequest) (*caasv1.DIDServiceIssueVerifiableCredentialResponse, error) {
 	if req.IssuerDid == "" || req.CredentialType == "" {
 		return nil, status.Error(codes.InvalidArgument, "issuer_did and credential_type are required")
 	}
@@ -564,10 +564,10 @@ func (s *DIDServer) IssueVerifiableCredential(ctx context.Context, req *caasv1.I
 		"credential_type": req.CredentialType,
 	})
 
-	return &caasv1.IssueVCResponse{Credential: vc}, nil
+	return &caasv1.DIDServiceIssueVerifiableCredentialResponse{Credential: vc}, nil
 }
 
-func (s *DIDServer) VerifyCredential(ctx context.Context, req *caasv1.VerifyVCRequest) (*caasv1.VerifyVCResponse, error) {
+func (s *DIDServer) VerifyCredential(ctx context.Context, req *caasv1.DIDServiceVerifyCredentialRequest) (*caasv1.DIDServiceVerifyCredentialResponse, error) {
 	var checks []string
 
 	var vc *caasv1.VerifiableCredentialV2
@@ -586,14 +586,14 @@ func (s *DIDServer) VerifyCredential(ctx context.Context, req *caasv1.VerifyVCRe
 	// Check 1: Status
 	if vc.Status == caasv1.CredentialStatus_CREDENTIAL_STATUS_REVOKED {
 		checks = append(checks, "FAIL: credential is revoked")
-		return &caasv1.VerifyVCResponse{Valid: false, Checks: checks, Credential: vc}, nil
+		return &caasv1.DIDServiceVerifyCredentialResponse{Valid: false, Checks: checks, Credential: vc}, nil
 	}
 	checks = append(checks, "PASS: credential not revoked")
 
 	// Check 2: Expiration
 	if vc.ExpirationDate != nil && vc.ExpirationDate.AsTime().Before(time.Now()) {
 		checks = append(checks, "FAIL: credential expired")
-		return &caasv1.VerifyVCResponse{Valid: false, Checks: checks, Credential: vc}, nil
+		return &caasv1.DIDServiceVerifyCredentialResponse{Valid: false, Checks: checks, Credential: vc}, nil
 	}
 	checks = append(checks, "PASS: credential not expired")
 
@@ -601,11 +601,11 @@ func (s *DIDServer) VerifyCredential(ctx context.Context, req *caasv1.VerifyVCRe
 	issuerDoc, err := s.store.GetDIDDocument(ctx, vc.IssuerDid)
 	if err != nil {
 		checks = append(checks, fmt.Sprintf("FAIL: issuer DID not found: %v", err))
-		return &caasv1.VerifyVCResponse{Valid: false, Checks: checks, Credential: vc}, nil
+		return &caasv1.DIDServiceVerifyCredentialResponse{Valid: false, Checks: checks, Credential: vc}, nil
 	}
 	if issuerDoc.Status == caasv1.DIDStatus_DID_STATUS_DEACTIVATED {
 		checks = append(checks, "FAIL: issuer DID is deactivated")
-		return &caasv1.VerifyVCResponse{Valid: false, Checks: checks, Credential: vc}, nil
+		return &caasv1.DIDServiceVerifyCredentialResponse{Valid: false, Checks: checks, Credential: vc}, nil
 	}
 	checks = append(checks, "PASS: issuer DID is active")
 
@@ -613,7 +613,7 @@ func (s *DIDServer) VerifyCredential(ctx context.Context, req *caasv1.VerifyVCRe
 	var proof map[string]any
 	if err := json.Unmarshal([]byte(vc.ProofJson), &proof); err != nil {
 		checks = append(checks, "FAIL: invalid proof JSON")
-		return &caasv1.VerifyVCResponse{Valid: false, Checks: checks, Credential: vc}, nil
+		return &caasv1.DIDServiceVerifyCredentialResponse{Valid: false, Checks: checks, Credential: vc}, nil
 	}
 
 	vmID, _ := proof["verificationMethod"].(string)
@@ -621,26 +621,26 @@ func (s *DIDServer) VerifyCredential(ctx context.Context, req *caasv1.VerifyVCRe
 
 	if vmID == "" || proofValue == "" {
 		checks = append(checks, "FAIL: proof missing verificationMethod or proofValue")
-		return &caasv1.VerifyVCResponse{Valid: false, Checks: checks, Credential: vc}, nil
+		return &caasv1.DIDServiceVerifyCredentialResponse{Valid: false, Checks: checks, Credential: vc}, nil
 	}
 
 	// Get the signing key's public key
 	keyType, pubMultibase, _, _, keyErr := s.store.GetKey(ctx, vmID)
 	if keyErr != nil {
 		checks = append(checks, fmt.Sprintf("FAIL: signing key not found: %v", keyErr))
-		return &caasv1.VerifyVCResponse{Valid: false, Checks: checks, Credential: vc}, nil
+		return &caasv1.DIDServiceVerifyCredentialResponse{Valid: false, Checks: checks, Credential: vc}, nil
 	}
 
 	pubRaw, _, mbErr := MultibaseToPublicKey(pubMultibase)
 	if mbErr != nil {
 		checks = append(checks, fmt.Sprintf("FAIL: decode public key: %v", mbErr))
-		return &caasv1.VerifyVCResponse{Valid: false, Checks: checks, Credential: vc}, nil
+		return &caasv1.DIDServiceVerifyCredentialResponse{Valid: false, Checks: checks, Credential: vc}, nil
 	}
 
 	sigBytes, decErr := base64.RawURLEncoding.DecodeString(proofValue)
 	if decErr != nil {
 		checks = append(checks, "FAIL: decode signature")
-		return &caasv1.VerifyVCResponse{Valid: false, Checks: checks, Credential: vc}, nil
+		return &caasv1.DIDServiceVerifyCredentialResponse{Valid: false, Checks: checks, Credential: vc}, nil
 	}
 
 	// Reconstruct the signed document (without proof) using the exact
@@ -684,14 +684,14 @@ func (s *DIDServer) VerifyCredential(ctx context.Context, req *caasv1.VerifyVCRe
 
 	if !sigValid {
 		checks = append(checks, "FAIL: signature verification failed")
-		return &caasv1.VerifyVCResponse{Valid: false, Checks: checks, Credential: vc}, nil
+		return &caasv1.DIDServiceVerifyCredentialResponse{Valid: false, Checks: checks, Credential: vc}, nil
 	}
 	checks = append(checks, "PASS: signature verified")
 
-	return &caasv1.VerifyVCResponse{Valid: true, Checks: checks, Credential: vc}, nil
+	return &caasv1.DIDServiceVerifyCredentialResponse{Valid: true, Checks: checks, Credential: vc}, nil
 }
 
-func (s *DIDServer) RevokeCredential(ctx context.Context, req *caasv1.RevokeVCRequest) (*caasv1.RevokeVCResponse, error) {
+func (s *DIDServer) RevokeCredential(ctx context.Context, req *caasv1.DIDServiceRevokeCredentialRequest) (*caasv1.DIDServiceRevokeCredentialResponse, error) {
 	if req.CredentialId == "" {
 		return nil, status.Error(codes.InvalidArgument, "credential_id is required")
 	}
@@ -706,10 +706,10 @@ func (s *DIDServer) RevokeCredential(ctx context.Context, req *caasv1.RevokeVCRe
 	})
 
 	vc, _ := s.store.GetCredentialV2(ctx, req.CredentialId)
-	return &caasv1.RevokeVCResponse{Credential: vc}, nil
+	return &caasv1.DIDServiceRevokeCredentialResponse{Credential: vc}, nil
 }
 
-func (s *DIDServer) GetCredential(ctx context.Context, req *caasv1.GetVCRequest) (*caasv1.GetVCResponse, error) {
+func (s *DIDServer) GetCredential(ctx context.Context, req *caasv1.DIDServiceGetCredentialRequest) (*caasv1.DIDServiceGetCredentialResponse, error) {
 	if req.CredentialId == "" {
 		return nil, status.Error(codes.InvalidArgument, "credential_id is required")
 	}
@@ -719,10 +719,10 @@ func (s *DIDServer) GetCredential(ctx context.Context, req *caasv1.GetVCRequest)
 		return nil, status.Errorf(codes.NotFound, "credential not found: %v", err)
 	}
 
-	return &caasv1.GetVCResponse{Credential: vc}, nil
+	return &caasv1.DIDServiceGetCredentialResponse{Credential: vc}, nil
 }
 
-func (s *DIDServer) ListCredentials(ctx context.Context, req *caasv1.ListVCsRequest) (*caasv1.ListVCsResponse, error) {
+func (s *DIDServer) ListCredentials(ctx context.Context, req *caasv1.DIDServiceListCredentialsRequest) (*caasv1.DIDServiceListCredentialsResponse, error) {
 	pageSize := int(req.PageSize)
 	if pageSize <= 0 {
 		pageSize = 20
@@ -741,12 +741,12 @@ func (s *DIDServer) ListCredentials(ctx context.Context, req *caasv1.ListVCsRequ
 		return nil, status.Errorf(codes.Internal, "list credentials: %v", err)
 	}
 
-	return &caasv1.ListVCsResponse{Credentials: creds, Total: int32(total)}, nil
+	return &caasv1.DIDServiceListCredentialsResponse{Credentials: creds, Total: int32(total)}, nil
 }
 
 // --- Verifiable Presentations ---
 
-func (s *DIDServer) CreatePresentation(ctx context.Context, req *caasv1.CreateVPRequest) (*caasv1.CreateVPResponse, error) {
+func (s *DIDServer) CreatePresentation(ctx context.Context, req *caasv1.DIDServiceCreatePresentationRequest) (*caasv1.DIDServiceCreatePresentationResponse, error) {
 	if req.HolderDid == "" || len(req.CredentialIds) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "holder_did and credential_ids are required")
 	}
@@ -826,17 +826,17 @@ func (s *DIDServer) CreatePresentation(ctx context.Context, req *caasv1.CreateVP
 		"credential_count": len(req.CredentialIds),
 	})
 
-	return &caasv1.CreateVPResponse{Presentation: vp}, nil
+	return &caasv1.DIDServiceCreatePresentationResponse{Presentation: vp}, nil
 }
 
-func (s *DIDServer) VerifyPresentation(ctx context.Context, req *caasv1.VerifyVPRequest) (*caasv1.VerifyVPResponse, error) {
+func (s *DIDServer) VerifyPresentation(ctx context.Context, req *caasv1.DIDServiceVerifyPresentationRequest) (*caasv1.DIDServiceVerifyPresentationResponse, error) {
 	if req.PresentationJson == "" {
 		return nil, status.Error(codes.InvalidArgument, "presentation_json is required")
 	}
 
 	var vpDoc map[string]any
 	if err := json.Unmarshal([]byte(req.PresentationJson), &vpDoc); err != nil {
-		return &caasv1.VerifyVPResponse{Valid: false, Checks: []string{"FAIL: invalid JSON"}}, nil
+		return &caasv1.DIDServiceVerifyPresentationResponse{Valid: false, Checks: []string{"FAIL: invalid JSON"}}, nil
 	}
 
 	var checks []string
@@ -844,21 +844,21 @@ func (s *DIDServer) VerifyPresentation(ctx context.Context, req *caasv1.VerifyVP
 	// Extract proof
 	proofRaw, ok := vpDoc["proof"]
 	if !ok {
-		return &caasv1.VerifyVPResponse{Valid: false, Checks: []string{"FAIL: no proof in presentation"}}, nil
+		return &caasv1.DIDServiceVerifyPresentationResponse{Valid: false, Checks: []string{"FAIL: no proof in presentation"}}, nil
 	}
 	proofMap, _ := proofRaw.(map[string]any)
 	vmID, _ := proofMap["verificationMethod"].(string)
 	proofValue, _ := proofMap["proofValue"].(string)
 
 	if vmID == "" || proofValue == "" {
-		return &caasv1.VerifyVPResponse{Valid: false, Checks: []string{"FAIL: incomplete proof"}}, nil
+		return &caasv1.DIDServiceVerifyPresentationResponse{Valid: false, Checks: []string{"FAIL: incomplete proof"}}, nil
 	}
 
 	// Get signing key
 	keyType, pubMultibase, _, _, err := s.store.GetKey(ctx, vmID)
 	if err != nil {
 		checks = append(checks, fmt.Sprintf("FAIL: key not found: %v", err))
-		return &caasv1.VerifyVPResponse{Valid: false, Checks: checks}, nil
+		return &caasv1.DIDServiceVerifyPresentationResponse{Valid: false, Checks: checks}, nil
 	}
 	checks = append(checks, "PASS: signing key found")
 
@@ -883,11 +883,11 @@ func (s *DIDServer) VerifyPresentation(ctx context.Context, req *caasv1.VerifyVP
 
 	if !valid {
 		checks = append(checks, "FAIL: signature verification failed")
-		return &caasv1.VerifyVPResponse{Valid: false, Checks: checks}, nil
+		return &caasv1.DIDServiceVerifyPresentationResponse{Valid: false, Checks: checks}, nil
 	}
 	checks = append(checks, "PASS: presentation signature verified")
 
-	return &caasv1.VerifyVPResponse{Valid: true, Checks: checks}, nil
+	return &caasv1.DIDServiceVerifyPresentationResponse{Valid: true, Checks: checks}, nil
 }
 
 // --- Helpers ---
