@@ -55,3 +55,4 @@ tmp/
 
 # Go workspace sum
 go.work.sum
+services/did-service/did-service
