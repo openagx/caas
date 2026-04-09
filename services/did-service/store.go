@@ -262,29 +262,29 @@ func (s *PostgresStore) RotateKey(ctx context.Context, keyID string) error {
 
 // --- Verifiable Credentials V2 ---
 
-func (s *PostgresStore) CreateCredentialV2(ctx context.Context, contextJSON, typeJSON json.RawMessage, issuerDID, subjectDID, entityID string, credSubject json.RawMessage, proof json.RawMessage, expirationDate *time.Time) (*caasv1.VerifiableCredentialV2, error) {
+func (s *PostgresStore) CreateCredentialV2(ctx context.Context, contextJSON, typeJSON json.RawMessage, issuerDID, subjectDID, entityID string, credSubject json.RawMessage, proof json.RawMessage, issuanceDate time.Time, expirationDate *time.Time) (*caasv1.VerifiableCredentialV2, error) {
 	var id string
-	var issuanceDate, createdAt time.Time
+	var storedIssuance, createdAt time.Time
 	err := s.pool.QueryRow(ctx,
-		`INSERT INTO verifiable_credentials_v2 (context, type, issuer_did, subject_did, entity_id, credential_subject, proof, expiration_date)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		`INSERT INTO verifiable_credentials_v2 (context, type, issuer_did, subject_did, entity_id, credential_subject, proof, issuance_date, expiration_date)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		 RETURNING id, issuance_date, created_at`,
-		contextJSON, typeJSON, issuerDID, nilIfEmpty(subjectDID), nilIfEmpty(entityID), credSubject, proof, expirationDate,
-	).Scan(&id, &issuanceDate, &createdAt)
+		contextJSON, typeJSON, issuerDID, nilIfEmpty(subjectDID), nilIfEmpty(entityID), credSubject, proof, issuanceDate, expirationDate,
+	).Scan(&id, &storedIssuance, &createdAt)
 	if err != nil {
 		return nil, fmt.Errorf("insert vc_v2: %w", err)
 	}
 
 	vc := &caasv1.VerifiableCredentialV2{
-		Id:          id,
-		ContextJson: string(contextJSON),
-		TypeJson:    string(typeJSON),
-		IssuerDid:   issuerDID,
-		SubjectDid:  subjectDID,
-		EntityId:    entityID,
-		ProofJson:   string(proof),
-		IssuanceDate: timestamppb.New(issuanceDate),
-		Status:      caasv1.CredentialStatus_CREDENTIAL_STATUS_ACTIVE,
+		Id:           id,
+		ContextJson:  string(contextJSON),
+		TypeJson:     string(typeJSON),
+		IssuerDid:    issuerDID,
+		SubjectDid:   subjectDID,
+		EntityId:     entityID,
+		ProofJson:    string(proof),
+		IssuanceDate: timestamppb.New(storedIssuance),
+		Status:       caasv1.CredentialStatus_CREDENTIAL_STATUS_ACTIVE,
 	}
 	if expirationDate != nil {
 		vc.ExpirationDate = timestamppb.New(*expirationDate)
@@ -293,6 +293,13 @@ func (s *PostgresStore) CreateCredentialV2(ctx context.Context, contextJSON, typ
 }
 
 func (s *PostgresStore) GetCredentialV2(ctx context.Context, id string) (*caasv1.VerifiableCredentialV2, error) {
+	vc, _, err := s.GetCredentialV2WithSubject(ctx, id)
+	return vc, err
+}
+
+// GetCredentialV2WithSubject returns the credential plus the raw credential_subject JSON bytes.
+// The raw JSON is needed by the verify path so the signed document can be reconstructed byte-for-byte.
+func (s *PostgresStore) GetCredentialV2WithSubject(ctx context.Context, id string) (*caasv1.VerifiableCredentialV2, []byte, error) {
 	var contextJSON, typeJSON, issuerDID, proofJSON, status string
 	var subjectDID, entityID *string
 	var credSubject json.RawMessage
@@ -304,7 +311,7 @@ func (s *PostgresStore) GetCredentialV2(ctx context.Context, id string) (*caasv1
 		 FROM verifiable_credentials_v2 WHERE id = $1`, id,
 	).Scan(&contextJSON, &typeJSON, &issuerDID, &subjectDID, &entityID, &credSubject, &proofJSON, &issuanceDate, &expirationDate, &status)
 	if err != nil {
-		return nil, fmt.Errorf("get vc_v2: %w", err)
+		return nil, nil, fmt.Errorf("get vc_v2: %w", err)
 	}
 
 	vc := &caasv1.VerifiableCredentialV2{
@@ -321,7 +328,7 @@ func (s *PostgresStore) GetCredentialV2(ctx context.Context, id string) (*caasv1
 	if expirationDate != nil {
 		vc.ExpirationDate = timestamppb.New(*expirationDate)
 	}
-	return vc, nil
+	return vc, credSubject, nil
 }
 
 func (s *PostgresStore) RevokeCredentialV2(ctx context.Context, id, reason string) error {

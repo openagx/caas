@@ -39,11 +39,13 @@ func NewDIDServer(store *PostgresStore, events *EventProducer, encryptionKey []b
 // --- DID Operations ---
 
 func (s *DIDServer) CreateDID(ctx context.Context, req *caasv1.CreateDIDRequest) (*caasv1.CreateDIDResponse, error) {
-	if req.EntityId == "" {
-		return nil, status.Error(codes.InvalidArgument, "entity_id is required")
-	}
 	if req.Method == caasv1.DIDMethod_DID_METHOD_UNSPECIFIED {
 		return nil, status.Error(codes.InvalidArgument, "method is required")
+	}
+	// entity_id is optional — standalone DIDs (e.g., a sovereign's federation issuer DID)
+	// do not need to be tied to an entity row. did:web requires entity_id only if domain is unset.
+	if req.Method == caasv1.DIDMethod_DID_METHOD_WEB && req.EntityId == "" {
+		return nil, status.Error(codes.InvalidArgument, "entity_id is required for did:web")
 	}
 
 	kt := req.KeyType
@@ -118,9 +120,11 @@ func (s *DIDServer) CreateDID(ctx context.Context, req *caasv1.CreateDIDRequest)
 		return nil, status.Errorf(codes.Internal, "store key: %v", err)
 	}
 
-	// Update entity's DID column
-	if err := s.store.UpdateEntityDID(ctx, req.EntityId, did); err != nil {
-		log.Printf("WARN: failed to update entity DID: %v", err)
+	// Update entity's DID column (only if DID is tied to an entity)
+	if req.EntityId != "" {
+		if err := s.store.UpdateEntityDID(ctx, req.EntityId, did); err != nil {
+			log.Printf("WARN: failed to update entity DID: %v", err)
+		}
 	}
 
 	s.events.Emit("did.created", map[string]any{
@@ -482,8 +486,16 @@ func (s *DIDServer) IssueVerifiableCredential(ctx context.Context, req *caasv1.I
 		return nil, status.Errorf(codes.Internal, "decrypt key: %v", err)
 	}
 
-	// Build credential subject
-	credSubjectJSON, _ := json.Marshal(req.CredentialSubject.AsMap())
+	// Build credential subject — inject subject DID as `id` if provided.
+	// The exact same map is both signed and stored so verification is deterministic.
+	credSubjectMap := map[string]any{}
+	if req.CredentialSubject != nil {
+		credSubjectMap = req.CredentialSubject.AsMap()
+	}
+	if req.SubjectDid != "" {
+		credSubjectMap["id"] = req.SubjectDid
+	}
+	credSubjectJSON, _ := json.Marshal(credSubjectMap)
 
 	// Build the credential document for signing
 	now := time.Now().UTC()
@@ -492,12 +504,7 @@ func (s *DIDServer) IssueVerifiableCredential(ctx context.Context, req *caasv1.I
 		"type":              []string{"VerifiableCredential", req.CredentialType},
 		"issuer":            req.IssuerDid,
 		"issuanceDate":      now.Format(time.RFC3339),
-		"credentialSubject": req.CredentialSubject.AsMap(),
-	}
-	if req.SubjectDid != "" {
-		cs := req.CredentialSubject.AsMap()
-		cs["id"] = req.SubjectDid
-		vcDoc["credentialSubject"] = cs
+		"credentialSubject": credSubjectMap,
 	}
 	if req.ExpirationDate != nil {
 		vcDoc["expirationDate"] = req.ExpirationDate.AsTime().Format(time.RFC3339)
@@ -546,7 +553,7 @@ func (s *DIDServer) IssueVerifiableCredential(ctx context.Context, req *caasv1.I
 		expDate = &t
 	}
 
-	vc, err := s.store.CreateCredentialV2(ctx, contextJSON, typeJSON, req.IssuerDid, req.SubjectDid, req.EntityId, credSubjectJSON, proofJSON, expDate)
+	vc, err := s.store.CreateCredentialV2(ctx, contextJSON, typeJSON, req.IssuerDid, req.SubjectDid, req.EntityId, credSubjectJSON, proofJSON, now, expDate)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "store credential: %v", err)
 	}
@@ -564,10 +571,11 @@ func (s *DIDServer) VerifyCredential(ctx context.Context, req *caasv1.VerifyVCRe
 	var checks []string
 
 	var vc *caasv1.VerifiableCredentialV2
+	var credSubjectJSON []byte
 	var err error
 
 	if req.CredentialId != "" {
-		vc, err = s.store.GetCredentialV2(ctx, req.CredentialId)
+		vc, credSubjectJSON, err = s.store.GetCredentialV2WithSubject(ctx, req.CredentialId)
 		if err != nil {
 			return nil, status.Errorf(codes.NotFound, "credential not found: %v", err)
 		}
@@ -635,21 +643,26 @@ func (s *DIDServer) VerifyCredential(ctx context.Context, req *caasv1.VerifyVCRe
 		return &caasv1.VerifyVCResponse{Valid: false, Checks: checks, Credential: vc}, nil
 	}
 
-	// Reconstruct the signed document (without proof)
+	// Reconstruct the signed document (without proof) using the exact
+	// credential_subject bytes that were stored at sign time.
 	var ctxArr, typeArr []string
 	json.Unmarshal([]byte(vc.ContextJson), &ctxArr)
 	json.Unmarshal([]byte(vc.TypeJson), &typeArr)
 
-	vcDoc := map[string]any{
-		"@context":     ctxArr,
-		"type":         typeArr,
-		"issuer":       vc.IssuerDid,
-		"issuanceDate": vc.IssuanceDate.AsTime().Format(time.RFC3339),
+	var credSubjectMap map[string]any
+	if len(credSubjectJSON) > 0 {
+		_ = json.Unmarshal(credSubjectJSON, &credSubjectMap)
 	}
-	if vc.SubjectDid != "" {
-		vcDoc["credentialSubject"] = map[string]any{"id": vc.SubjectDid}
-	} else {
-		vcDoc["credentialSubject"] = map[string]any{}
+	if credSubjectMap == nil {
+		credSubjectMap = map[string]any{}
+	}
+
+	vcDoc := map[string]any{
+		"@context":          ctxArr,
+		"type":              typeArr,
+		"issuer":            vc.IssuerDid,
+		"issuanceDate":      vc.IssuanceDate.AsTime().Format(time.RFC3339),
+		"credentialSubject": credSubjectMap,
 	}
 	if vc.ExpirationDate != nil {
 		vcDoc["expirationDate"] = vc.ExpirationDate.AsTime().Format(time.RFC3339)
