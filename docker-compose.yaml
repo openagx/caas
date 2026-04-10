@@ -80,6 +80,78 @@ services:
       retries: 10
       start_period: 10s
 
+  # --- Identity (Ory) ---
+
+  kratos-migrate:
+    image: oryd/kratos:v1.3.1
+    command: migrate sql -e --yes
+    environment:
+      DSN: postgres://caas:caas_dev@postgres:5432/kratos?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: on-failure
+
+  kratos:
+    image: oryd/kratos:v1.3.1
+    command: serve -c /etc/config/kratos.yaml --dev --watch-courier
+    environment:
+      DSN: postgres://caas:caas_dev@postgres:5432/kratos?sslmode=disable
+    ports:
+      - "4433:4433"  # Public API
+      - "4434:4434"  # Admin API
+    volumes:
+      - ./infra/ory/kratos.yaml:/etc/config/kratos.yaml:ro
+      - ./infra/ory/identity.schema.json:/etc/config/identity.schema.json:ro
+    depends_on:
+      kratos-migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:4434/health/alive || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  hydra-migrate:
+    image: oryd/hydra:v2.3.0
+    command: migrate sql -e --yes
+    environment:
+      DSN: postgres://caas:caas_dev@postgres:5432/hydra?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: on-failure
+
+  hydra:
+    image: oryd/hydra:v2.3.0
+    command: serve all -c /etc/config/hydra.yaml --dev
+    environment:
+      DSN: postgres://caas:caas_dev@postgres:5432/hydra?sslmode=disable
+      SECRETS_SYSTEM: PLEASE-CHANGE-ME-I-AM-VERY-INSECURE
+      URLS_SELF_ISSUER: http://localhost:4444
+      URLS_LOGIN: http://localhost:3000/login
+      URLS_CONSENT: http://localhost:3000/consent
+      URLS_LOGOUT: http://localhost:3000/logout
+    ports:
+      - "4444:4444"  # Public (OIDC)
+      - "4445:4445"  # Admin
+    volumes:
+      - ./infra/ory/hydra.yaml:/etc/config/hydra.yaml:ro
+    depends_on:
+      hydra-migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:4445/health/alive || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   # --- Event Streaming ---
 
   redpanda:
@@ -123,7 +195,7 @@ services:
       context: .
       dockerfile: infra/docker/authz-engine.Dockerfile
     ports:
-      - "50051:50051"
+      - "50061:50051"  # Host 50061 → container 50051 (50051 taken by SpiceDB)
     environment:
       AUTHZ_PORT: "50051"
       SPICEDB_ENDPOINT: spicedb:50051
@@ -308,6 +380,10 @@ services:
       FEDERATION_ENDPOINT: federation-service:50056
       SURPLUS_ENDPOINT: surplus-engine:50057
       DID_ENDPOINT: did-service:50058
+      KRATOS_PUBLIC_URL: http://kratos:4433
+      KRATOS_ADMIN_URL: http://kratos:4434
+      HYDRA_PUBLIC_URL: http://hydra:4444
+      HYDRA_ADMIN_URL: http://hydra:4445
     depends_on:
       - authz-engine
       - entity-service

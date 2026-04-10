@@ -1,0 +1,58 @@
+version: v2.2.0
+
+dsn: postgres://caas:caas_dev@postgres:5432/hydra?sslmode=disable
+
+serve:
+  public:
+    cors:
+      enabled: true
+      allowed_origins:
+        - http://localhost:3000
+        - http://localhost:3001
+      allowed_methods:
+        - POST
+        - GET
+        - PUT
+        - PATCH
+        - DELETE
+      allowed_headers:
+        - Authorization
+        - Content-Type
+      exposed_headers:
+        - Content-Type
+  cookies:
+    same_site_mode: Lax
+
+urls:
+  self:
+    issuer: http://localhost:4444
+  consent: http://localhost:3000/consent
+  login: http://localhost:3000/login
+  logout: http://localhost:3000/logout
+
+secrets:
+  system:
+    - PLEASE-CHANGE-ME-I-AM-VERY-INSECURE
+
+oidc:
+  subject_identifiers:
+    supported_types:
+      - pairwise
+      - public
+    pairwise:
+      salt: PLEASE-CHANGE-ME-I-AM-VERY-INSECURE
+
+ttl:
+  login_consent_request: 1h
+  access_token: 1h
+  refresh_token: 720h
+  id_token: 1h
+  auth_code: 10m
+
+oauth2:
+  expose_internal_errors: true
+
+log:
+  level: info
+  format: json
+  leak_sensitive_values: false
