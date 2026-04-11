@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import AuthHeader from "./auth-header";
 
 export const metadata: Metadata = {
   title: "CAAS Dashboard",
@@ -37,12 +38,24 @@ export default function RootLayout({
             <NavLink href="/did">Identity (DID)</NavLink>
             <NavLink href="/permissions">Permission Tester</NavLink>
             <div style={{ marginTop: "auto", padding: "0 8px", fontSize: 12, color: "#666" }}>
-              v0.8.0 — DID Service
+              v0.9.0 — Ory Kratos + Hydra
             </div>
           </nav>
-          <main style={{ flex: 1, padding: 32 }}>
-            {children}
-          </main>
+          <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+            <header style={{
+              display: "flex",
+              justifyContent: "flex-end",
+              alignItems: "center",
+              padding: "12px 32px",
+              borderBottom: "1px solid #222",
+              backgroundColor: "#111",
+            }}>
+              <AuthHeader />
+            </header>
+            <main style={{ flex: 1, padding: 32 }}>
+              {children}
+            </main>
+          </div>
         </div>
       </body>
     </html>

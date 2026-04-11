@@ -13,6 +13,9 @@ const DECISION_ENDPOINT = process.env.DECISION_ENDPOINT || "localhost:50055";
 const FEDERATION_ENDPOINT = process.env.FEDERATION_ENDPOINT || "localhost:50056";
 const SURPLUS_ENDPOINT = process.env.SURPLUS_ENDPOINT || "localhost:50057";
 const DID_ENDPOINT = process.env.DID_ENDPOINT || "localhost:50058";
+const KRATOS_PUBLIC_URL = process.env.KRATOS_PUBLIC_URL || "http://localhost:4433";
+const KRATOS_ADMIN_URL = process.env.KRATOS_ADMIN_URL || "http://localhost:4434";
+const HYDRA_ADMIN_URL = process.env.HYDRA_ADMIN_URL || "http://localhost:4445";
 
 const app = Fastify({ logger: true });
 
@@ -61,6 +64,7 @@ await app.register(swagger, {
       { name: "credentials", description: "Verifiable credentials issuance and verification" },
       { name: "authority", description: "Authority override hierarchy (5 tiers)" },
       { name: "surplus", description: "Surplus/need listings, matching, and quality verification" },
+      { name: "auth", description: "Authentication (Ory Kratos sessions, Hydra OIDC)" },
       { name: "did", description: "Decentralized Identifier management and resolution" },
       { name: "vc", description: "Verifiable Credentials (W3C compliant)" },
     ],
@@ -72,6 +76,168 @@ await app.register(swaggerUi, { routePrefix: "/docs" });
 // --- Health ---
 
 app.get("/health", async () => ({ status: "ok" }));
+
+// --- Kratos Session Verification ---
+
+interface KratosSession {
+  id: string;
+  active: boolean;
+  identity: {
+    id: string;
+    traits: {
+      email: string;
+      name?: { first?: string; last?: string };
+      entity_id?: string;
+      did?: string;
+    };
+  };
+}
+
+async function verifyKratosSession(cookie: string | undefined, authHeader: string | undefined): Promise<KratosSession | null> {
+  const headers: Record<string, string> = {};
+  if (cookie) headers["cookie"] = cookie;
+  if (authHeader) headers["authorization"] = authHeader;
+
+  if (!cookie && !authHeader) return null;
+
+  try {
+    const res = await fetch(`${KRATOS_PUBLIC_URL}/sessions/whoami`, { headers });
+    if (!res.ok) return null;
+    return res.json() as Promise<KratosSession>;
+  } catch {
+    return null;
+  }
+}
+
+// Decorate request with session info
+app.decorateRequest("kratosSession", null);
+
+// Auth middleware — skips public routes
+app.addHook("onRequest", async (req, reply) => {
+  const publicPaths = ["/health", "/docs", "/.well-known", "/auth/"];
+  const isPublic = publicPaths.some((p) => req.url.startsWith(p));
+  if (isPublic) return;
+
+  const session = await verifyKratosSession(
+    req.headers.cookie,
+    req.headers.authorization,
+  );
+
+  if (!session) {
+    reply.code(401).send({ error: "Unauthorized", message: "Valid Kratos session required" });
+    return;
+  }
+
+  (req as any).kratosSession = session;
+});
+
+// --- Auth Routes (public) ---
+
+app.get("/auth/session", {
+  schema: { tags: ["auth"] },
+}, async (req) => {
+  const session = await verifyKratosSession(req.headers.cookie, req.headers.authorization);
+  if (!session) return { authenticated: false };
+  return {
+    authenticated: true,
+    identity: session.identity.id,
+    email: session.identity.traits.email,
+    name: session.identity.traits.name,
+    entity_id: session.identity.traits.entity_id,
+    did: session.identity.traits.did,
+  };
+});
+
+app.get("/auth/kratos/urls", {
+  schema: { tags: ["auth"] },
+}, async () => ({
+  login: `${KRATOS_PUBLIC_URL}/self-service/login/browser`,
+  registration: `${KRATOS_PUBLIC_URL}/self-service/registration/browser`,
+  logout: `${KRATOS_PUBLIC_URL}/self-service/logout/browser`,
+  settings: `${KRATOS_PUBLIC_URL}/self-service/settings/browser`,
+  recovery: `${KRATOS_PUBLIC_URL}/self-service/recovery/browser`,
+}));
+
+// --- Hydra Consent Flow ---
+
+app.get("/auth/hydra/login", {
+  schema: { tags: ["auth"] },
+}, async (req, reply) => {
+  const challenge = (req.query as any).login_challenge;
+  if (!challenge) return reply.code(400).send({ error: "login_challenge required" });
+
+  const res = await fetch(`${HYDRA_ADMIN_URL}/admin/oauth2/auth/requests/login?login_challenge=${challenge}`);
+  const body = await res.json() as any;
+
+  if (body.skip) {
+    const accept = await fetch(`${HYDRA_ADMIN_URL}/admin/oauth2/auth/requests/login/accept?login_challenge=${challenge}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ subject: body.subject }),
+    });
+    const acceptBody = await accept.json() as any;
+    return reply.redirect(acceptBody.redirect_to);
+  }
+
+  return reply.redirect(`http://localhost:3000/login?login_challenge=${challenge}`);
+});
+
+app.put<{ Body: { login_challenge: string; subject: string } }>("/auth/hydra/login/accept", {
+  schema: { tags: ["auth"] },
+}, async (req) => {
+  const res = await fetch(
+    `${HYDRA_ADMIN_URL}/admin/oauth2/auth/requests/login/accept?login_challenge=${req.body.login_challenge}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ subject: req.body.subject, remember: true, remember_for: 3600 }),
+    },
+  );
+  return res.json();
+});
+
+app.get("/auth/hydra/consent", {
+  schema: { tags: ["auth"] },
+}, async (req, reply) => {
+  const challenge = (req.query as any).consent_challenge;
+  if (!challenge) return reply.code(400).send({ error: "consent_challenge required" });
+
+  const res = await fetch(`${HYDRA_ADMIN_URL}/admin/oauth2/auth/requests/consent?consent_challenge=${challenge}`);
+  const body = await res.json() as any;
+
+  if (body.skip) {
+    const accept = await fetch(`${HYDRA_ADMIN_URL}/admin/oauth2/auth/requests/consent/accept?consent_challenge=${challenge}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        grant_scope: body.requested_scope,
+        grant_access_token_audience: body.requested_access_token_audience,
+      }),
+    });
+    const acceptBody = await accept.json() as any;
+    return reply.redirect(acceptBody.redirect_to);
+  }
+
+  return reply.redirect(`http://localhost:3000/consent?consent_challenge=${challenge}`);
+});
+
+app.put<{ Body: { consent_challenge: string; grant_scope: string[] } }>("/auth/hydra/consent/accept", {
+  schema: { tags: ["auth"] },
+}, async (req) => {
+  const res = await fetch(
+    `${HYDRA_ADMIN_URL}/admin/oauth2/auth/requests/consent/accept?consent_challenge=${req.body.consent_challenge}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        grant_scope: req.body.grant_scope,
+        remember: true,
+        remember_for: 3600,
+      }),
+    },
+  );
+  return res.json();
+});
 
 // --- Entity Routes ---
 
