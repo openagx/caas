@@ -38,7 +38,7 @@ export default function RootLayout({
             <NavLink href="/did">Identity (DID)</NavLink>
             <NavLink href="/permissions">Permission Tester</NavLink>
             <div style={{ marginTop: "auto", padding: "0 8px", fontSize: 12, color: "#666" }}>
-              v0.9.0 — Ory Kratos + Hydra
+              v0.9.0 — Logto Auth
             </div>
           </nav>
           <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>

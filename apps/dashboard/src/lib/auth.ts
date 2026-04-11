@@ -1,100 +1,98 @@
-const KRATOS_PUBLIC_URL = process.env.NEXT_PUBLIC_KRATOS_URL || "http://localhost:4433";
+const LOGTO_ENDPOINT = process.env.NEXT_PUBLIC_LOGTO_ENDPOINT || "http://localhost:3301";
+const LOGTO_APP_ID = process.env.NEXT_PUBLIC_LOGTO_APP_ID || "";
+const LOGTO_RESOURCE = process.env.NEXT_PUBLIC_LOGTO_RESOURCE || "https://api.caas.local";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
-
-export interface KratosFlow {
-  id: string;
-  type: string;
-  ui: {
-    action: string;
-    method: string;
-    nodes: KratosNode[];
-    messages?: { id: number; text: string; type: string }[];
-  };
-}
-
-export interface KratosNode {
-  type: string;
-  group: string;
-  attributes: {
-    name: string;
-    type: string;
-    value?: string;
-    required?: boolean;
-    disabled?: boolean;
-    node_type: string;
-  };
-  messages: { id: number; text: string; type: string }[];
-  meta: { label?: { id: number; text: string } };
-}
+const REDIRECT_URI = process.env.NEXT_PUBLIC_LOGTO_REDIRECT_URI || "http://localhost:3000/callback";
 
 export interface SessionInfo {
   authenticated: boolean;
-  identity?: string;
+  sub?: string;
   email?: string;
-  name?: { first?: string; last?: string };
+  name?: string;
   entity_id?: string;
   did?: string;
 }
 
+export function getAccessToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return sessionStorage.getItem("caas_access_token");
+}
+
+export function setAccessToken(token: string): void {
+  sessionStorage.setItem("caas_access_token", token);
+}
+
+export function clearAccessToken(): void {
+  sessionStorage.removeItem("caas_access_token");
+}
+
 export async function getSession(): Promise<SessionInfo> {
+  const token = getAccessToken();
+  if (!token) return { authenticated: false };
+
   try {
-    const res = await fetch(`${API_BASE}/auth/session`, { credentials: "include" });
-    if (!res.ok) return { authenticated: false };
+    const res = await fetch(`${API_BASE}/auth/session`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      clearAccessToken();
+      return { authenticated: false };
+    }
     return res.json();
   } catch {
     return { authenticated: false };
   }
 }
 
-export async function getLoginFlow(flowId?: string): Promise<KratosFlow> {
-  if (flowId) {
-    const res = await fetch(`${KRATOS_PUBLIC_URL}/self-service/login/flows?id=${flowId}`, {
-      credentials: "include",
-    });
-    return res.json();
-  }
-  // Initialize new flow — browser redirect
-  const res = await fetch(`${KRATOS_PUBLIC_URL}/self-service/login/api`, {
-    credentials: "include",
+export function buildLoginUrl(): string {
+  const state = crypto.randomUUID();
+  sessionStorage.setItem("logto_state", state);
+
+  const params = new URLSearchParams({
+    client_id: LOGTO_APP_ID,
+    redirect_uri: REDIRECT_URI,
+    response_type: "code",
+    scope: "openid profile email",
+    state,
+    resource: LOGTO_RESOURCE,
   });
-  return res.json();
+
+  return `${LOGTO_ENDPOINT}/oidc/auth?${params}`;
 }
 
-export async function getRegistrationFlow(flowId?: string): Promise<KratosFlow> {
-  if (flowId) {
-    const res = await fetch(`${KRATOS_PUBLIC_URL}/self-service/registration/flows?id=${flowId}`, {
-      credentials: "include",
-    });
-    return res.json();
-  }
-  const res = await fetch(`${KRATOS_PUBLIC_URL}/self-service/registration/api`, {
-    credentials: "include",
-  });
-  return res.json();
-}
+export async function handleCallback(code: string, state: string): Promise<boolean> {
+  const savedState = sessionStorage.getItem("logto_state");
+  if (state !== savedState) return false;
 
-export async function submitFlow(action: string, body: Record<string, string>): Promise<any> {
-  const res = await fetch(action, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
-    body: JSON.stringify(body),
-  });
-  return res.json();
-}
-
-export async function logout(): Promise<void> {
   try {
-    const res = await fetch(`${KRATOS_PUBLIC_URL}/self-service/logout/browser`, {
-      credentials: "include",
+    const res = await fetch(`${LOGTO_ENDPOINT}/oidc/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: REDIRECT_URI,
+        client_id: LOGTO_APP_ID,
+      }),
     });
+
+    if (!res.ok) return false;
     const data = await res.json();
-    if (data.logout_url) {
-      window.location.href = data.logout_url;
-    }
+    setAccessToken(data.access_token);
+    sessionStorage.removeItem("logto_state");
+    return true;
   } catch {
-    window.location.href = "/login";
+    return false;
   }
 }
 
-export { KRATOS_PUBLIC_URL, API_BASE };
+export function buildLogoutUrl(): string {
+  clearAccessToken();
+  const params = new URLSearchParams({
+    client_id: LOGTO_APP_ID,
+    post_logout_redirect_uri: "http://localhost:3000",
+  });
+  return `${LOGTO_ENDPOINT}/oidc/session/end?${params}`;
+}
+
+export { LOGTO_ENDPOINT, API_BASE };

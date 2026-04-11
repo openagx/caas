@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getSession, logout, type SessionInfo } from "../lib/auth";
+import { getSession, buildLogoutUrl, type SessionInfo } from "../lib/auth";
 
 export default function AuthHeader() {
   const [session, setSession] = useState<SessionInfo | null>(null);
@@ -16,7 +16,6 @@ export default function AuthHeader() {
     return (
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <a href="/login" style={linkStyle}>Sign In</a>
-        <a href="/registration" style={{ ...linkStyle, background: "#3b82f6", color: "#fff" }}>Register</a>
       </div>
     );
   }
@@ -24,32 +23,32 @@ export default function AuthHeader() {
   return (
     <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
       <span style={{ fontSize: 13, color: "#aaa" }}>
-        {session.name?.first ? `${session.name.first} ${session.name.last || ""}`.trim() : session.email}
+        {session.name || session.email || session.sub}
       </span>
       {session.did && (
         <span style={{ fontSize: 11, color: "#666", fontFamily: "monospace" }}>
           {session.did.length > 30 ? session.did.slice(0, 30) + "..." : session.did}
         </span>
       )}
-      <button onClick={() => logout()} style={{
+      <a href={buildLogoutUrl()} style={{
         padding: "4px 12px",
         background: "#333",
         color: "#ccc",
         border: "none",
         borderRadius: 4,
-        cursor: "pointer",
+        textDecoration: "none",
         fontSize: 12,
       }}>
         Sign Out
-      </button>
+      </a>
     </div>
   );
 }
 
 const linkStyle: React.CSSProperties = {
   padding: "6px 14px",
-  background: "#222",
-  color: "#ccc",
+  background: "#3b82f6",
+  color: "#fff",
   border: "none",
   borderRadius: 6,
   textDecoration: "none",

@@ -2,11 +2,8 @@
 -- SpiceDB gets its own database (managed by spicedb-migrate)
 CREATE DATABASE spicedb;
 
--- Ory Kratos (user identity)
-CREATE DATABASE kratos;
-
--- Ory Hydra (OAuth2/OIDC provider)
-CREATE DATABASE hydra;
+-- Logto (authentication / OIDC provider)
+CREATE DATABASE logto;
 
 -- Entity service tables
 CREATE TABLE IF NOT EXISTS entities (
