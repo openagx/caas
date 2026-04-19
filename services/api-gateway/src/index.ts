@@ -3,40 +3,69 @@ import cors from "@fastify/cors";
 import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
 import { createEntityClient, createAuthzClient, createTrustClient, createDecisionClient, createFederationClient, createSurplusClient, createDIDClient } from "./grpc-client.js";
+import { loadConfig } from "./config.js";
+import { incrementFraudCounter, metricsContentType, recordRequestDuration, renderPrometheusMetrics } from "./observability.js";
 
-const PORT = parseInt(process.env.API_PORT || "3001", 10);
-const ENTITY_ENDPOINT = process.env.ENTITY_ENDPOINT || "localhost:50052";
-const AUTHZ_ENDPOINT = process.env.AUTHZ_ENDPOINT || "localhost:50051";
-const TRUST_ENDPOINT = process.env.TRUST_ENDPOINT || "localhost:50053";
-const FRAUD_URL = process.env.FRAUD_URL || "http://localhost:50054";
-const DECISION_ENDPOINT = process.env.DECISION_ENDPOINT || "localhost:50055";
-const FEDERATION_ENDPOINT = process.env.FEDERATION_ENDPOINT || "localhost:50056";
-const SURPLUS_ENDPOINT = process.env.SURPLUS_ENDPOINT || "localhost:50057";
-const DID_ENDPOINT = process.env.DID_ENDPOINT || "localhost:50058";
-const LOGTO_ENDPOINT = process.env.LOGTO_ENDPOINT || "http://localhost:3301";
-const LOGTO_RESOURCE = process.env.LOGTO_RESOURCE || "https://api.caas.local";
+const config = loadConfig();
 
-const app = Fastify({ logger: true });
+const rateLimitBuckets = new Map<string, { count: number; windowStart: number }>();
+
+const app = Fastify({
+  logger: {
+    level: config.nodeEnv === "production" ? "info" : "debug",
+    redact: ["req.headers.authorization", "headers.authorization"],
+  },
+});
 
 // gRPC clients
-const entityClient = createEntityClient(ENTITY_ENDPOINT);
-const authzClient = createAuthzClient(AUTHZ_ENDPOINT);
-const trustClient = createTrustClient(TRUST_ENDPOINT);
-const decisionClient = createDecisionClient(DECISION_ENDPOINT);
-const federationClient = createFederationClient(FEDERATION_ENDPOINT);
-const surplusClient = createSurplusClient(SURPLUS_ENDPOINT);
-const didClient = createDIDClient(DID_ENDPOINT);
+const entityClient = createEntityClient(config.entityEndpoint);
+const authzClient = createAuthzClient(config.authzEndpoint);
+const trustClient = createTrustClient(config.trustEndpoint);
+const decisionClient = createDecisionClient(config.decisionEndpoint);
+const federationClient = createFederationClient(config.federationEndpoint);
+const surplusClient = createSurplusClient(config.surplusEndpoint);
+const didClient = createDIDClient(config.didEndpoint);
+
+async function fetchWithRetry(url: string, init: RequestInit, retries: number): Promise<Response> {
+  let attempt = 0;
+  let lastError: unknown;
+
+  while (attempt <= retries) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), config.requestTimeoutMs);
+
+    try {
+      const response = await fetch(url, { ...init, signal: controller.signal });
+      clearTimeout(timeout);
+      if (response.status >= 500 && attempt < retries) {
+        attempt += 1;
+        continue;
+      }
+      return response;
+    } catch (error) {
+      clearTimeout(timeout);
+      lastError = error;
+      if (attempt >= retries) break;
+      attempt += 1;
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("Fraud service request failed");
+}
 
 // HTTP proxy helper for fraud-pipeline (REST-based service)
 async function fraudFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${FRAUD_URL}${path}`, {
+  const res = await fetchWithRetry(`${config.fraudUrl}${path}`, {
     ...init,
     headers: { "Content-Type": "application/json", ...init?.headers },
-  });
+  }, config.fraudRetryAttempts);
+
   if (!res.ok) {
+    incrementFraudCounter("error");
     const text = await res.text();
     throw new Error(`Fraud service error ${res.status}: ${text}`);
   }
+  incrementFraudCounter("ok");
   return res.json() as Promise<T>;
 }
 
@@ -51,7 +80,7 @@ await app.register(swagger, {
       description: "Continuous Autonomous Authorization System — REST Gateway",
       version: "0.1.0",
     },
-    servers: [{ url: `http://localhost:${PORT}` }],
+    servers: [{ url: `http://localhost:${config.port}` }],
     tags: [
       { name: "entities", description: "Entity lifecycle management" },
       { name: "authorization", description: "Permission checks and lookups" },
@@ -72,9 +101,66 @@ await app.register(swagger, {
 
 await app.register(swaggerUi, { routePrefix: "/docs" });
 
+app.addHook("onRequest", async (request, reply) => {
+  reply.header("x-content-type-options", "nosniff");
+  reply.header("x-frame-options", "DENY");
+  reply.header("referrer-policy", "no-referrer");
+
+  const key = request.ip;
+  const now = Date.now();
+  const existing = rateLimitBuckets.get(key);
+  if (!existing || now - existing.windowStart >= config.rateLimitWindowMs) {
+    rateLimitBuckets.set(key, { count: 1, windowStart: now });
+    return;
+  }
+
+  existing.count += 1;
+  if (existing.count > config.rateLimitMax) {
+    reply.code(429).send({
+      error: "rate_limited",
+      message: "Too many requests",
+    });
+  }
+});
+
+app.addHook("onResponse", async (request, reply) => {
+  const route = request.routeOptions.url || request.url;
+  const durationMs = reply.elapsedTime;
+  recordRequestDuration(request.method, route, String(reply.statusCode), durationMs);
+});
+
+app.setErrorHandler((error, request, reply) => {
+  request.log.error({ err: error }, "request failed");
+
+  if (reply.sent) {
+    return;
+  }
+
+  const statusCode = (error as { statusCode?: number }).statusCode ?? 500;
+  reply.code(statusCode >= 400 && statusCode < 600 ? statusCode : 500).send({
+    error: "internal_error",
+    message: statusCode >= 500 ? "Internal server error" : (error as Error).message,
+  });
+});
+
 // --- Health ---
 
-app.get("/health", async () => ({ status: "ok" }));
+app.get("/health", async () => ({ status: "ok", service: "api-gateway" }));
+
+app.get("/ready", async (_req, reply) => {
+  try {
+    await entityClient.listEntities({ pageSize: 1, pageToken: "", entityType: 0, lifecycleState: 0 });
+    return { status: "ready" };
+  } catch (error) {
+    reply.code(503);
+    return { status: "not_ready", reason: (error as Error).message };
+  }
+});
+
+app.get("/metrics", async (_req, reply) => {
+  reply.header("content-type", metricsContentType);
+  return renderPrometheusMetrics();
+});
 
 // --- Logto OIDC Auth ---
 
@@ -89,24 +175,13 @@ interface LogtoUserInfo {
   };
 }
 
-// Cache OIDC discovery
-let jwksUri: string | null = null;
-
-async function getJwksUri(): Promise<string> {
-  if (jwksUri) return jwksUri;
-  const res = await fetch(`${LOGTO_ENDPOINT}/oidc/.well-known/openid-configuration`);
-  const config = await res.json() as any;
-  jwksUri = config.jwks_uri;
-  return jwksUri!;
-}
-
 async function verifyLogtoToken(authHeader: string | undefined): Promise<LogtoUserInfo | null> {
   if (!authHeader?.startsWith("Bearer ")) return null;
   const token = authHeader.slice(7);
 
   try {
     // Validate by calling Logto's userinfo endpoint with the access token
-    const res = await fetch(`${LOGTO_ENDPOINT}/oidc/me`, {
+    const res = await fetch(`${config.logtoEndpoint}/oidc/me`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) return null;
@@ -121,7 +196,9 @@ app.decorateRequest("logtoUser", null);
 
 // Auth middleware — skips public routes
 app.addHook("onRequest", async (req, reply) => {
-  const publicPaths = ["/health", "/docs", "/.well-known", "/auth/"];
+  if (!config.authEnabled) return;
+
+  const publicPaths = ["/health", "/ready", "/metrics", "/docs", "/.well-known", "/auth/"];
   const isPublic = publicPaths.some((p) => req.url.startsWith(p));
   if (isPublic) return;
 
@@ -154,8 +231,8 @@ app.get("/auth/session", {
 app.get("/auth/config", {
   schema: { tags: ["auth"] },
 }, async () => ({
-  logto_endpoint: LOGTO_ENDPOINT,
-  resource: LOGTO_RESOURCE,
+  logto_endpoint: config.logtoEndpoint,
+  resource: config.logtoResource,
 }));
 
 // --- Entity Routes ---
@@ -2075,9 +2152,9 @@ app.post<{ Body: { presentation_json: string } }>(
 // --- Start ---
 
 try {
-  await app.listen({ port: PORT, host: "0.0.0.0" });
-  app.log.info(`CAAS API Gateway running on http://localhost:${PORT}`);
-  app.log.info(`Swagger docs at http://localhost:${PORT}/docs`);
+  await app.listen({ port: config.port, host: "0.0.0.0" });
+  app.log.info(`CAAS API Gateway running on http://localhost:${config.port}`);
+  app.log.info(`Swagger docs at http://localhost:${config.port}/docs`);
 } catch (err) {
   app.log.error(err);
   process.exit(1);
