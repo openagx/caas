@@ -323,6 +323,11 @@ services:
       - "3001:3001"
     environment:
       API_PORT: "3001"
+      AUTH_ENABLED: "true"
+      REQUEST_TIMEOUT_MS: "3000"
+      FRAUD_RETRY_ATTEMPTS: "2"
+      RATE_LIMIT_MAX: "250"
+      RATE_LIMIT_WINDOW: 1 minute
       ENTITY_ENDPOINT: entity-service:50052
       AUTHZ_ENDPOINT: authz-engine:50051
       TRUST_ENDPOINT: trust-engine:50053
@@ -332,7 +337,13 @@ services:
       SURPLUS_ENDPOINT: surplus-engine:50057
       DID_ENDPOINT: did-service:50058
       LOGTO_ENDPOINT: http://logto:3301
-      LOGTO_ADMIN_ENDPOINT: http://logto:3302
+      LOGTO_RESOURCE: https://api.caas.local
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3001/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     depends_on:
       - authz-engine
       - entity-service
