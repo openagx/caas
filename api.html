@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Api - AAGFE</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; max-width: 900px; margin: 0 auto; padding: 2rem; color: #333; }
+        h1, h2, h3 { color: #1a1a2e; }
+        h1 { border-bottom: 3px solid #0066ff; padding-bottom: 0.5rem; }
+        table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+        th, td { border: 1px solid #ddd; padding: 0.75rem; text-align: left; }
+        th { background: #f5f5f5; }
+        code { background: #f4f4f4; padding: 0.2rem 0.4rem; border-radius: 3px; }
+        pre { background: #1a1a2e; color: #f0f0f0; padding: 1rem; border-radius: 8px; overflow-x: auto; }
+        pre code { background: transparent; padding: 0; }
+        .nav { margin-bottom: 2rem; }
+        .nav a { margin-right: 1rem; color: #0066ff; text-decoration: none; }
+        .nav a:hover { text-decoration: underline; }
+        footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid #ddd; color: #666; font-size: 0.9rem; }
+    </style>
+</head>
+<body>
+    <nav class="nav">
+        <a href="/">Home</a>
+        <a href="whitepaper.html">Whitepaper</a>
+        <a href="api.html">API</a>
+        <a href="owasp.html">OWASP</a>
+        <a href="status.html">Status</a>
+    </nav>
+    <h1>AAGFE API Documentation</h1>
+<h2>Core Services</h2>
+<h3>API Gateway (Port 3001)</h3>
+<p><strong>REST Endpoints:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Endpoint</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GET</td>
+<td>/health</td>
+<td>Liveness probe</td>
+</tr>
+<tr>
+<td>GET</td>
+<td>/ready</td>
+<td>Readiness check</td>
+</tr>
+<tr>
+<td>GET</td>
+<td>/metrics</td>
+<td>Prometheus metrics</td>
+</tr>
+<tr>
+<td>POST</td>
+<td>/v1/entities</td>
+<td>Create entity</td>
+</tr>
+<tr>
+<td>GET</td>
+<td>/v1/entities/:id</td>
+<td>Get entity</td>
+</tr>
+<tr>
+<td>PUT</td>
+<td>/v1/entities/:id</td>
+<td>Update entity</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td>/v1/entities/:id</td>
+<td>Delete entity</td>
+</tr>
+<tr>
+<td>GET</td>
+<td>/v1/relationships</td>
+<td>List relationships</td>
+</tr>
+<tr>
+<td>POST</td>
+<td>/v1/relationships</td>
+<td>Create relationship</td>
+</tr>
+<tr>
+<td>GET</td>
+<td>/v1/trust/:entity_id</td>
+<td>Get trust score</td>
+</tr>
+<tr>
+<td>POST</td>
+<td>/v1/decisions</td>
+<td>Submit decision request</td>
+</tr>
+</tbody>
+</table>
+<h3>Auth Engine gRPC (Port 50051)</h3>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Check</td>
+<td>Check authorization (ReBAC)</td>
+</tr>
+<tr>
+<td>Expand</td>
+<td>Expand relationships</td>
+</tr>
+<tr>
+<td>Write</td>
+<td>Write relationship tuples</td>
+</tr>
+<tr>
+<td>Watch</td>
+<td>Watch for changes</td>
+</tr>
+</tbody>
+</table>
+<h3>Entity Service gRPC (Port 50052)</h3>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CreateEntity</td>
+<td>Create entity</td>
+</tr>
+<tr>
+<td>GetEntity</td>
+<td>Get entity</td>
+</tr>
+<tr>
+<td>UpdateEntity</td>
+<td>Update entity</td>
+</tr>
+<tr>
+<td>DeleteEntity</td>
+<td>Delete entity</td>
+</tr>
+<tr>
+<td>ListEntities</td>
+<td>List entities</td>
+</tr>
+<tr>
+<td>TransitionState</td>
+<td>Entity lifecycle state transition</td>
+</tr>
+</tbody>
+</table>
+<h3>Trust Engine gRPC (Port 50053)</h3>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ComputeTrustScore</td>
+<td>Compute trust score</td>
+</tr>
+<tr>
+<td>GetTrustScore</td>
+<td>Get entity trust score</td>
+</tr>
+<tr>
+<td>UpdateTrust</td>
+<td>Update trust relationship</td>
+</tr>
+<tr>
+<td>QueryGraph</td>
+<td>Query social graph</td>
+</tr>
+</tbody>
+</table>
+<h3>Fraud Pipeline gRPC (Port 50054)</h3>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DetectAnomaly</td>
+<td>Detect behavioral anomaly</td>
+</tr>
+<tr>
+<td>GetRiskScore</td>
+<td>Get entity risk score</td>
+</tr>
+<tr>
+<td>ReportIncident</td>
+<td>Report fraud incident</td>
+</tr>
+</tbody>
+</table>
+<h3>Decision Service gRPC (Port 50055)</h3>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>RequestDecision</td>
+<td>Request M-of-N decision</td>
+</tr>
+<tr>
+<td>GetDecision</td>
+<td>Get decision status</td>
+</tr>
+<tr>
+<td>Vote</td>
+<td>Submit decision vote</td>
+</tr>
+</tbody>
+</table>
+<h3>DID Service gRPC (Port 50058)</h3>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CreateDID</td>
+<td>Create W3C DID</td>
+</tr>
+<tr>
+<td>ResolveDID</td>
+<td>Resolve DID</td>
+</tr>
+<tr>
+<td>IssueVC</td>
+<td>Issue Verifiable Credential</td>
+</tr>
+<tr>
+<td>VerifyVC</td>
+<td>Verify Verifiable Credential</td>
+</tr>
+</tbody>
+</table>
+<h3>OPA Sidecar (Port 8181)</h3>
+<p><strong>REST Endpoints:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Endpoint</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GET</td>
+<td>/health</td>
+<td>Health check</td>
+</tr>
+<tr>
+<td>POST</td>
+<td>/v1/data/authz/allow</td>
+<td>Evaluate authorization</td>
+</tr>
+</tbody>
+</table>
+<p><strong>OPA Input:</strong></p>
+<p><code>json
+{
+  "spicedb": { "allowed": true },
+  "behavior": { 
+    "anomaly_score": 0.0,
+    "velocity_ops_5m": 0,
+    "drift_score": 0.0
+  },
+  "subject": {
+    "trust_score": 1.0,
+    "auth_strength": "mfa"
+  },
+  "context": {
+    "device_trust": 1.0,
+    "ip_reputation": 0.0
+  },
+  "resource": {
+    "sensitivity": "normal"
+  }
+}</code></p>
+<p><strong>OPA Decision:</strong></p>
+<p><code>json
+{
+  "allow": true,
+  "reason": [],
+  "risk_score": 0.0,
+  "recommended_action": "allow"
+}</code></p>
+<h2>Cognitive Guard Layer (CGL)</h2>
+<h3>Intent Registry (Port 50060)</h3>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>RegisterIntent</td>
+<td>Register task intent</td>
+</tr>
+<tr>
+<td>ValidateIntent</td>
+<td>Validate intent</td>
+</tr>
+<tr>
+<td>GetIntent</td>
+<td>Get registered intent</td>
+</tr>
+</tbody>
+</table>
+<h3>CoT Auditor (Port 50061)</h3>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>AuditCoT</td>
+<td>Audit chain-of-thought</td>
+</tr>
+<tr>
+<td>Compare</td>
+<td>Compare CoT changes</td>
+</tr>
+</tbody>
+</table>
+<h3>Constraint Injector (Port 50062)</h3>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>InjectConstraints</td>
+<td>Inject system constraints</td>
+</tr>
+<tr>
+<td>VerifyConstraints</td>
+<td>Verify constraints present</td>
+</tr>
+</tbody>
+</table>
+<h3>Drift Scorer (Port 50063)</h3>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ScoreDrift</td>
+<td>Calculate drift score</td>
+</tr>
+<tr>
+<td>GetDriftHistory</td>
+<td>Get drift history</td>
+</tr>
+</tbody>
+</table>
+<h3>Memory Isolator (Port 50064)</h3>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CreateTaskMemory</td>
+<td>Create isolated memory</td>
+</tr>
+<tr>
+<td>GetTaskMemory</td>
+<td>Get task memory</td>
+</tr>
+<tr>
+<td>ClearTaskMemory</td>
+<td>Clear task memory</td>
+</tr>
+</tbody>
+</table>
+<h3>Sycophancy Guard (Port 50066)</h3>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CheckCompliance</td>
+<td>Check constraint compliance</td>
+</tr>
+<tr>
+<td>DetectErosion</td>
+<td>Detect constraint erosion</td>
+</tr>
+</tbody>
+</table>
+<h3>Planner Iteration (Port 50067)</h3>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>TrackIteration</td>
+<td>Track planner iteration</td>
+</tr>
+<tr>
+<td>GetIterationCount</td>
+<td>Get iteration count</td>
+</tr>
+</tbody>
+</table>
+<h2>Agent Protocols</h2>
+<h3>Agent Network Protocol (Port 50069)</h3>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>RegisterAgent</td>
+<td>Register on network</td>
+</tr>
+<tr>
+<td>DiscoverAgents</td>
+<td>Discover agents</td>
+</tr>
+<tr>
+<td>NegotiateTrust</td>
+<td>Establish trust</td>
+</tr>
+<tr>
+<td>Delegate</td>
+<td>Grant delegation</td>
+</tr>
+<tr>
+<td>VerifyDelegation</td>
+<td>Verify delegation</td>
+</tr>
+</tbody>
+</table>
+<h3>Agent Communication Protocol (Port 50070)</h3>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Send</td>
+<td>Send message</td>
+</tr>
+<tr>
+<td>Request</td>
+<td>Request/response</td>
+</tr>
+<tr>
+<td>Publish</td>
+<td>Publish to topic</td>
+</tr>
+<tr>
+<td>Subscribe</td>
+<td>Subscribe to topic</td>
+</tr>
+<tr>
+<td>Broadcast</td>
+<td>Broadcast message</td>
+</tr>
+<tr>
+<td>GetInbox</td>
+<td>Get messages</td>
+</tr>
+</tbody>
+</table>
+<h3>FGA Protocol (Port 8081)</h3>
+<p>OpenFGA-compatible API:</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Endpoint</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>POST</td>
+<td>/stores/:id/check</td>
+</tr>
+<tr>
+<td>POST</td>
+<td>/stores/:id/expand</td>
+</tr>
+<tr>
+<td>POST</td>
+<td>/stores/:id/list-objects</td>
+</tr>
+<tr>
+<td>POST</td>
+<td>/stores/:id/read</td>
+</tr>
+<tr>
+<td>POST</td>
+<td>/stores/:id/write</td>
+</tr>
+</tbody>
+</table>
+<h2>gRPC Service Definition</h2>
+<p>All gRPC services use Protocol Buffers. See <code>proto/caas/v1/</code> for full definitions.</p>
+<h3>Environment Variables</h3>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Description</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DATABASE_URL</td>
+<td>PostgreSQL connection</td>
+<td>postgres://caas:caas_dev@localhost:5432/caas</td>
+</tr>
+<tr>
+<td>REDIS_URL</td>
+<td>Redis connection</td>
+<td>redis://localhost:6379</td>
+</tr>
+<tr>
+<td>SPICEDB_ENDPOINT</td>
+<td>SpiceDB gRPC</td>
+<td>localhost:50051</td>
+</tr>
+<tr>
+<td>NEO4J_URI</td>
+<td>Neo4j connection</td>
+<td>bolt://localhost:7687</td>
+</tr>
+<tr>
+<td>KAFKA_BROKERS</td>
+<td>Redpanda brokers</td>
+<td>localhost:19092</td>
+</tr>
+</tbody>
+</table>
+    <footer>
+        <p>AAGFE — Agentic Automation Governance For Every Entity</p>
+        <p>Apache 2.0 — OpenAutonomyx (OPC) Private Limited</p>
+    </footer>
+</body>
+</html>

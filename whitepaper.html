@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aagfe-Whitepaper - AAGFE</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; max-width: 900px; margin: 0 auto; padding: 2rem; color: #333; }
+        h1, h2, h3 { color: #1a1a2e; }
+        h1 { border-bottom: 3px solid #0066ff; padding-bottom: 0.5rem; }
+        table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+        th, td { border: 1px solid #ddd; padding: 0.75rem; text-align: left; }
+        th { background: #f5f5f5; }
+        code { background: #f4f4f4; padding: 0.2rem 0.4rem; border-radius: 3px; }
+        pre { background: #1a1a2e; color: #f0f0f0; padding: 1rem; border-radius: 8px; overflow-x: auto; }
+        pre code { background: transparent; padding: 0; }
+        .nav { margin-bottom: 2rem; }
+        .nav a { margin-right: 1rem; color: #0066ff; text-decoration: none; }
+        .nav a:hover { text-decoration: underline; }
+        footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid #ddd; color: #666; font-size: 0.9rem; }
+    </style>
+</head>
+<body>
+    <nav class="nav">
+        <a href="/">Home</a>
+        <a href="whitepaper.html">Whitepaper</a>
+        <a href="api.html">API</a>
+        <a href="owasp.html">OWASP</a>
+        <a href="status.html">Status</a>
+    </nav>
+    <h1>AAGFE: Agentic Automation Governance For Every Entity</h1>
+<h2>Zero Trust Authorization for Autonomous AI Agents</h2>
+<p><strong>Whitepaper v1.0</strong> — OpenAutonomyx (OPC) Private Limited</p>
+<hr />
+<h2>Abstract</h2>
+<p>AAGFE (Agentic Automation Governance For Every Entity) is a Zero Trust authorization infrastructure that combines Google Zanzibar-style relationship-based access control (ReBAC) with behavioral-gate intelligence, drift scoring, and deterministic policy enforcement. Designed for sovereign deployment, AAGFE provides sub-millisecond authorization decisions for autonomous AI agents at scale.</p>
+<hr />
+<h2>1. Introduction</h2>
+<h3>The Problem</h3>
+<p>Autonomous AI agents require fine-grained authorization that traditional RBAC cannot provide. Key challenges:</p>
+<ol>
+<li><strong>Relationship-based permissions</strong> — Who can access what, and under what context</li>
+<li><strong>Behavioral risk</strong> — Detecting anomalous agent behavior in real-time</li>
+<li><strong>Drift detection</strong> — Identifying goal deviation over time</li>
+<li><strong>Sub-millisecond latency</strong> — Agents execute at speed; authorization must keep pace</li>
+</ol>
+<h3>The Solution</h3>
+<p>AAGFE implements a two-layer authorization system:</p>
+<p>```
+Layer 1: SpiceDB (ReBAC) → Relationship permission
+Layer 2: OPA Sidecar (ABAC + Behavioral + Drift) → Contextual allow/deny</p>
+<p>FINAL: ALLOW only if SpiceDB = ALLOW AND OPA = ALLOW
+```</p>
+<hr />
+<h2>2. Architecture</h2>
+<h3>2.1 Entity Types (6)</h3>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Human Individual</td>
+<td>Natural persons</td>
+</tr>
+<tr>
+<td>Organization</td>
+<td>Corporate entities</td>
+</tr>
+<tr>
+<td>Device/IoT</td>
+<td>Hardware identities</td>
+</tr>
+<tr>
+<td>Service/API</td>
+<td>Microservices</td>
+</tr>
+<tr>
+<td>AI Agent</td>
+<td>Autonomous agents</td>
+</tr>
+<tr>
+<td>Autonomous System</td>
+<td>Agent collectives</td>
+</tr>
+</tbody>
+</table>
+<h3>2.2 Core Services</h3>
+<table>
+<thead>
+<tr>
+<th>Service</th>
+<th>Port</th>
+<th>Technology</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>authz-engine</td>
+<td>50051</td>
+<td>Go + SpiceDB</td>
+</tr>
+<tr>
+<td>entity-service</td>
+<td>50052</td>
+<td>Go + PostgreSQL</td>
+</tr>
+<tr>
+<td>trust-engine</td>
+<td>50053</td>
+<td>Go + Python</td>
+</tr>
+<tr>
+<td>fraud-pipeline</td>
+<td>50054</td>
+<td>Python</td>
+</tr>
+<tr>
+<td>decision-service</td>
+<td>50055</td>
+<td>Go</td>
+</tr>
+<tr>
+<td>authz-opa-sidecar</td>
+<td>8181</td>
+<td>OPA/Rego</td>
+</tr>
+</tbody>
+</table>
+<h3>2.3 Authorization Stack</h3>
+<p><strong>Backend:</strong> SpiceDB (Zanzibar database)
+<strong>Protocol:</strong> FGA (Fine-Grained Authorization) API for client interoperability</p>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Technology</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SpiceDB</td>
+<td>Database</td>
+<td>Zanzibar tuples (ReBAC)</td>
+</tr>
+<tr>
+<td>OPA Sidecar</td>
+<td>Policy</td>
+<td>ABAC + behavioral + drift</td>
+</tr>
+<tr>
+<td>FGA Protocol</td>
+<td>API</td>
+<td>Client interface (OpenFGA-compatible)</td>
+</tr>
+</tbody>
+</table>
+<h3>2.4 Data Model</h3>
+<p><strong>Zanzibar tuples:</strong> <code>resource#relation@subject</code></p>
+<p>Example: <code>document:123#viewer@user:alice</code></p>
+<h3>2.4 Trust Score (0-1000, 7 dimensions)</h3>
+<ol>
+<li><strong>Identity Verification</strong> — KYC/identity proof</li>
+<li><strong>Behavioral Baseline</strong> — Historical pattern match</li>
+<li><strong>Device Trust</strong> — Device fingerprint confidence</li>
+<li><strong>Network Reputation</strong> — IP/ASN history</li>
+<li><strong>Credential Age</strong> — Time since last rotation</li>
+<li><strong>Social Graph</strong> — Trust network density</li>
+<li><strong>Endorsement</strong> — Verified endorsements</li>
+</ol>
+<hr />
+<h2>3. Two-Layer Authorization</h2>
+<h3>3.1 Layer 1: SpiceDB (ReBAC)</h3>
+<p>SpiceDB evaluates relationship permissions:</p>
+<p><code>go
+// Query SpiceDB
+allowed, token, err := spicedb.Check(ctx, resType, resID, perm, subType, subID)</code></p>
+<h3>3.2 Layer 2: OPA Sidecar</h3>
+<p>OPA evaluates contextual risk:</p>
+<p>```rego</p>
+<h1>policy.rego</h1>
+<p>allow {
+    not override_deny
+    spicedb_pass
+    abac_pass
+    behavioral_pass
+    drift_pass
+}
+```</p>
+<p><strong>Behavioral Gate:</strong>
+- Velocity control (5m + 1h)
+- Anomaly threshold
+- Resource sensitivity escalation</p>
+<p><strong>Drift Scoring:</strong>
+- Goal deviation tracking
+- Memory contamination detection
+- Chain-of-thought anomaly</p>
+<p><strong>ABAC:</strong>
+- MFA enforcement
+- Device trust threshold
+- IP reputation filtering</p>
+<hr />
+<h2>4. OWASP Agentic Top 10 Coverage</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>OWASP Risk</th>
+<th>AAGFE Countermeasure</th>
+<th>Latency</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ASI01</td>
+<td>Goal Hijack</td>
+<td>behavioral_gate</td>
+<td>&lt;1ms</td>
+</tr>
+<tr>
+<td>ASI02</td>
+<td>Tool Abuse</td>
+<td>abac + fraud-pipeline</td>
+<td>&lt;1ms</td>
+</tr>
+<tr>
+<td>ASI03</td>
+<td>Privilege Escalation</td>
+<td>spicedb + opa trust</td>
+<td>&lt;1ms</td>
+</tr>
+<tr>
+<td>ASI04</td>
+<td>Supply Chain</td>
+<td>drift_scorer</td>
+<td>&lt;1ms</td>
+</tr>
+<tr>
+<td>ASI05</td>
+<td>Memory Poisoning</td>
+<td>cot-auditor</td>
+<td>&lt;1ms</td>
+</tr>
+<tr>
+<td>ASI06</td>
+<td>Planning Manipulation</td>
+<td>planner-iteration</td>
+<td>&lt;1ms</td>
+</tr>
+<tr>
+<td>ASI07</td>
+<td>Multi-Agent Trust</td>
+<td>boundary-enforcer</td>
+<td>&lt;1ms</td>
+</tr>
+<tr>
+<td>ASI08</td>
+<td>Over-reliance</td>
+<td>sycophancy-guard</td>
+<td>&lt;1ms</td>
+</tr>
+<tr>
+<td>ASI09</td>
+<td>Human Trust Exploit</td>
+<td>decision-service</td>
+<td>&lt;10ms</td>
+</tr>
+<tr>
+<td>ASI10</td>
+<td>Rogue Agent</td>
+<td>intent-registry</td>
+<td>&lt;1ms</td>
+</tr>
+</tbody>
+</table>
+<p>All policies enforce with <strong>&lt;1ms p99 latency</strong>.</p>
+<hr />
+<h2>5. Deployment</h2>
+<h3>5.1 Docker Compose</h3>
+<p><code>bash
+cp .env.example .env
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d</code></p>
+<h3>5.2 Environment Variables</h3>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SPICEDB_ENDPOINT</td>
+<td>SpiceDB host:port</td>
+</tr>
+<tr>
+<td>SPICEDB_PRESHARED_KEY</td>
+<td>Authentication key</td>
+</tr>
+<tr>
+<td>DATABASE_URL</td>
+<td>PostgreSQL connection</td>
+</tr>
+<tr>
+<td>REDIS_URL</td>
+<td>Redis cache</td>
+</tr>
+<tr>
+<td>KAFKA_BROKERS</td>
+<td>Redpanda brokers</td>
+</tr>
+</tbody>
+</table>
+<h3>5.3 Health Checks</h3>
+<p>Every service exposes <code>/health</code> endpoint with:
+- Liveness probe
+- Readiness probe
+- Prometheus metrics</p>
+<hr />
+<h2>6. Observability</h2>
+<h3>6.1 Metrics</h3>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>opa_allow_total</td>
+<td>Counter</td>
+<td>Total allows</td>
+</tr>
+<tr>
+<td>opa_deny_total</td>
+<td>Counter</td>
+<td>Total denials</td>
+</tr>
+<tr>
+<td>behavioral_gate_failures</td>
+<td>Counter</td>
+<td>Behavioral blocks</td>
+</tr>
+<tr>
+<td>drift_gate_failures</td>
+<td>Counter</td>
+<td>Drift blocks</td>
+</tr>
+</tbody>
+</table>
+<h3>6.2 Logging</h3>
+<p>Structured JSON logging with trace IDs:</p>
+<p><code>json
+{
+  "trace_id": "abc123",
+  "spicedb": {"allowed": true},
+  "opa_decision": {"allow": true, "risk_score": 0.1},
+  "latency_ms": 0.5
+}</code></p>
+<hr />
+<h2>7. Security Properties</h2>
+<h3>7.1 Tenets</h3>
+<ol>
+<li><strong>Least Privilege</strong> — Minimum permissions by default</li>
+<li><strong>Explicit Verification</strong> — Always verify relationships</li>
+<li><strong>Fail Secure</strong> — Deny on any uncertainty</li>
+<li><strong>Behavioral Bounds</strong> — Constrain agent behavior</li>
+<li><strong>Human-in-Loop</strong> — Escalate high-risk to humans</li>
+</ol>
+<h3>7.2 Defense in Depth</h3>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Mechanism</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Identity</td>
+<td>DID + W3C VC</td>
+</tr>
+<tr>
+<td>Authorization</td>
+<td>SpiceDB ReBAC</td>
+</tr>
+<tr>
+<td>Context</td>
+<td>OPA ABAC</td>
+</tr>
+<tr>
+<td>Behavior</td>
+<td>Fraud ML</td>
+</tr>
+<tr>
+<td>Decision</td>
+<td>M-of-N human</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>8. Comparison</h2>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>AAGFE</th>
+<th>OpenZiti</th>
+<th>Authzed</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ReBAC (Zanzibar)</td>
+<td>✅</td>
+<td>Partial</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Behavioral Gate</td>
+<td>✅</td>
+<td>❌</td>
+<td>❌</td>
+</tr>
+<tr>
+<td>Drift Score</td>
+<td>✅</td>
+<td>❌</td>
+<td>❌</td>
+</tr>
+<tr>
+<td>FGA Protocol</td>
+<td>✅</td>
+<td>❌</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>OPA Integration</td>
+<td>✅</td>
+<td>❌</td>
+<td>❌</td>
+</tr>
+<tr>
+<td>Sub-ms Latency</td>
+<td>✅</td>
+<td>❌</td>
+<td>Partial</td>
+</tr>
+<tr>
+<td>Agent Support</td>
+<td>✅</td>
+<td>✅</td>
+<td>Partial</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>9. References</h2>
+<ul>
+<li>Google Zanzibar: Google's Consistent, Global Authorization System (ATC '19)</li>
+<li>OpenFGA: Fine-Grained Authorization Protocol (github.com/openfga)</li>
+<li>Open Policy Agent: Policy Language and Evaluation (openpolicyagent.org)</li>
+<li>OWASP Top 10 for Agentic Applications (2025)</li>
+<li>W3C Decentralized Identifiers (DIDs) v1.0</li>
+<li>SpiceDB: Open Source Zanzibar (authzed.com)</li>
+<li>Behavioral Anomaly Detection for AI Agents (Multimodal Threat Intelligence, 2024)</li>
+</ul>
+<hr />
+<h2>10. Conclusion</h2>
+<p>AAGFE provides production-ready authorization for autonomous AI agents with:</p>
+<ul>
+<li>✅ Sub-millisecond enforcement</li>
+<li>✅ OWASP Top 10 coverage</li>
+<li>✅ Relationship-based access (ReBAC)</li>
+<li>✅ Behavioral intelligence</li>
+<li>✅ Drift detection</li>
+<li>✅ Sovereign deployment</li>
+</ul>
+<p><strong>Contact:</strong> OpenAutonomyx (OPC) Private Limited<br />
+<strong>Repo:</strong> github.com/openagx/caas<br />
+<strong>License:</strong> Apache 2.0</p>
+    <footer>
+        <p>AAGFE — Agentic Automation Governance For Every Entity</p>
+        <p>Apache 2.0 — OpenAutonomyx (OPC) Private Limited</p>
+    </footer>
+</body>
+</html>

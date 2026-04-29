@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Owasp-Mapping - AAGFE</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; max-width: 900px; margin: 0 auto; padding: 2rem; color: #333; }
+        h1, h2, h3 { color: #1a1a2e; }
+        h1 { border-bottom: 3px solid #0066ff; padding-bottom: 0.5rem; }
+        table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+        th, td { border: 1px solid #ddd; padding: 0.75rem; text-align: left; }
+        th { background: #f5f5f5; }
+        code { background: #f4f4f4; padding: 0.2rem 0.4rem; border-radius: 3px; }
+        pre { background: #1a1a2e; color: #f0f0f0; padding: 1rem; border-radius: 8px; overflow-x: auto; }
+        pre code { background: transparent; padding: 0; }
+        .nav { margin-bottom: 2rem; }
+        .nav a { margin-right: 1rem; color: #0066ff; text-decoration: none; }
+        .nav a:hover { text-decoration: underline; }
+        footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid #ddd; color: #666; font-size: 0.9rem; }
+    </style>
+</head>
+<body>
+    <nav class="nav">
+        <a href="/">Home</a>
+        <a href="whitepaper.html">Whitepaper</a>
+        <a href="api.html">API</a>
+        <a href="owasp.html">OWASP</a>
+        <a href="status.html">Status</a>
+    </nav>
+    <h1>AAGFE OWASP Agentic Top 10 Mapping</h1>
+<h2>10 OWASP Agentic AI Risks with Deterministic Enforcement</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>OWASP Risk</th>
+<th>AAGFE Policy</th>
+<th>Enforcement Latency</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ASI01</td>
+<td>Goal Hijack</td>
+<td>behavioral_gate: GOAL_DEVIATION</td>
+<td>&lt;1ms</td>
+</tr>
+<tr>
+<td>ASI02</td>
+<td>Tool Abuse</td>
+<td>abac: tool_whitelist + fraud-pipeline</td>
+<td>&lt;1ms</td>
+</tr>
+<tr>
+<td>ASI03</td>
+<td>Privilege Escalation</td>
+<td>spicedb + opa: trust gate</td>
+<td>&lt;1ms</td>
+</tr>
+<tr>
+<td>ASI04</td>
+<td>Supply Chain</td>
+<td>drift_scorer: dependency anomaly</td>
+<td>&lt;1ms</td>
+</tr>
+<tr>
+<td>ASI05</td>
+<td>Memory Poisoning</td>
+<td>cot-auditor: context contamination</td>
+<td>&lt;1ms</td>
+</tr>
+<tr>
+<td>ASI06</td>
+<td>Planning Manipulation</td>
+<td>planner-iteration: scope_creep</td>
+<td>&lt;1ms</td>
+</tr>
+<tr>
+<td>ASI07</td>
+<td>Multi-Agent Trust</td>
+<td>boundary-enforcer: trust_graph</td>
+<td>&lt;1ms</td>
+</tr>
+<tr>
+<td>ASI08</td>
+<td>Over-reliance</td>
+<td>sycophancy-guard: retraction detection</td>
+<td>&lt;1ms</td>
+</tr>
+<tr>
+<td>ASI09</td>
+<td>Human Trust Exploit</td>
+<td>decision-service: M-of-N hold</td>
+<td>&lt;10ms</td>
+</tr>
+<tr>
+<td>ASI10</td>
+<td>Rogue Agent</td>
+<td>intent-registry + lifecycle: SUSPENDED</td>
+<td>&lt;1ms</td>
+</tr>
+</tbody>
+</table>
+<h2>AAGFE Countermeasures</h2>
+<h3>ASI01 — Goal Hijack</h3>
+<p>```rego</p>
+<h1>behavioral_gate.rego</h1>
+<p>drift_pass {
+    input.behavior.goal_deviation &lt; 0.3
+}
+```</p>
+<h3>ASI02 — Tool Abuse</h3>
+<p>```rego</p>
+<h1>abac.rego</h1>
+<p>abac_pass {
+    input.tool.name in data.allowed_tools
+    input.tool.risk_score &lt; data.tool_risk_threshold
+}
+```</p>
+<h3>ASI03 — Privilege Escalation</h3>
+<p>```rego</p>
+<h1>policy.rego</h1>
+<p>override_deny {
+    input.subject.trust_score &lt; data.thresholds.trust_minimum
+}
+```</p>
+<h3>ASI04 — Supply Chain</h3>
+<p>```rego</p>
+<h1>drift_scorer.rego</h1>
+<p>drift_pass {
+    input.behavior.dependency_anomaly &lt; 0.5
+}
+```</p>
+<h3>ASI05 — Memory Poisoning</h3>
+<p>```rego</p>
+<h1>behavioral_gate.rego</h1>
+<p>behavioral_pass {
+    input.behavior.context_contamination &lt; 0.4
+}
+```</p>
+<h3>ASI06 — Planning Manipulation</h3>
+<p>```rego</p>
+<h1>drift_scorer.rego</h1>
+<p>drift_pass {
+    input.planner.scope_creep &lt; 0.3
+}
+```</p>
+<h3>ASI07 — Multi-Agent Trust</h3>
+<p>```rego</p>
+<h1>policy.rego - agent-to-agent verification</h1>
+<p>spicedb_pass {
+    input.agent.trust_score &gt; data.thresholds.agent_trust_min
+}
+```</p>
+<h3>ASI08 — Over-reliance (Sycophany)</h3>
+<p>```rego</p>
+<h1>sycophancy-guard.rego</h1>
+<p>sycophancy_detected {
+    input.agent.retracted_refusal == true
+    input.user.pressure_score &gt; 0.7
+}
+```</p>
+<h3>ASI09 — Human Trust Exploit</h3>
+<p>```rego</p>
+<h1>decision.rego - escalate to M-of-N</h1>
+<p>recommended_action == "step_up_auth" {
+    input.risk_score &gt;= 0.5
+}
+```</p>
+<h3>ASI10 — Rogue Agent</h3>
+<p>```rego</p>
+<h1>policy.rego - immediate suspension</h1>
+<p>override_deny {
+    input.entity.lifecycle == "rogue"
+}
+```</p>
+<h2>Latency Guarantees</h2>
+<p>All policy evaluations run through OPA at &lt;1ms p99 via:
+- In-memory policy bundle
+- Pre-compiled Rego 
+- No external calls in hot path
+- Redis cache for threshold data</p>
+    <footer>
+        <p>AAGFE — Agentic Automation Governance For Every Entity</p>
+        <p>Apache 2.0 — OpenAutonomyx (OPC) Private Limited</p>
+    </footer>
+</body>
+</html>

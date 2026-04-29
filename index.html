@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AAGFE - AAGFE</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; max-width: 900px; margin: 0 auto; padding: 2rem; color: #333; }
+        h1, h2, h3 { color: #1a1a2e; }
+        h1 { border-bottom: 3px solid #0066ff; padding-bottom: 0.5rem; }
+        table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+        th, td { border: 1px solid #ddd; padding: 0.75rem; text-align: left; }
+        th { background: #f5f5f5; }
+        code { background: #f4f4f4; padding: 0.2rem 0.4rem; border-radius: 3px; }
+        pre { background: #1a1a2e; color: #f0f0f0; padding: 1rem; border-radius: 8px; overflow-x: auto; }
+        pre code { background: transparent; padding: 0; }
+        .nav { margin-bottom: 2rem; }
+        .nav a { margin-right: 1rem; color: #0066ff; text-decoration: none; }
+        .nav a:hover { text-decoration: underline; }
+        footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid #ddd; color: #666; font-size: 0.9rem; }
+    </style>
+</head>
+<body>
+    <nav class="nav">
+        <a href="/">Home</a>
+        <a href="whitepaper.html">Whitepaper</a>
+        <a href="api.html">API</a>
+        <a href="owasp.html">OWASP</a>
+        <a href="status.html">Status</a>
+    </nav>
+    <h1>AAGFE (Agentic Automation Governance For Every Entity)</h1>
+<p><strong>Zero Trust Authorization Infrastructure for Autonomous AI Agents</strong></p>
+<p>AAGFE combines Google Zanzibar-style ReBAC with behavioral intelligence, drift detection, and deterministic policy enforcement — providing sub-millisecond authorization for agentic AI systems.</p>
+<hr />
+<h2>Architecture</h2>
+<p><code>┌─────────────────────────────────────────────────────────────────┐
+│                        API Gateway (3001)                        │
+├─────────────────────────────────────────────────────────────────┤
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────────┐  │
+│  │   SpiceDB    │ →  │  OPA Sidecar │ →  │  Final Decision  │  │
+│  │   (ReBAC)    │    │  (ABAC+Drift)│    │                  │  │
+│  │   Layer 1    │    │   Layer 2    │    │  ALLOW if BOTH   │  │
+│  └──────────────┘    └──────────────┘    └──────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘</code></p>
+<h2>Core Services</h2>
+<table>
+<thead>
+<tr>
+<th>Service</th>
+<th>Port</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>api-gateway</td>
+<td>3001</td>
+<td>REST/GraphQL gateway</td>
+</tr>
+<tr>
+<td>authz-engine</td>
+<td>50051</td>
+<td>SpiceDB wrapper (ReBAC)</td>
+</tr>
+<tr>
+<td>entity-service</td>
+<td>50052</td>
+<td>Entity CRUD + lifecycle</td>
+</tr>
+<tr>
+<td>trust-engine</td>
+<td>50053</td>
+<td>Social graph + trust scoring</td>
+</tr>
+<tr>
+<td>fraud-pipeline</td>
+<td>50054</td>
+<td>ML anomaly detection</td>
+</tr>
+<tr>
+<td>decision-service</td>
+<td>50055</td>
+<td>M-of-N human approval</td>
+</tr>
+<tr>
+<td>federation-service</td>
+<td>50056</td>
+<td>Cross-sovereign trust</td>
+</tr>
+<tr>
+<td>surplus-engine</td>
+<td>50057</td>
+<td>Surplus/need matching</td>
+</tr>
+<tr>
+<td>did-service</td>
+<td>50058</td>
+<td>W3C DID + VC management</td>
+</tr>
+<tr>
+<td>authz-opa-sidecar</td>
+<td>8181</td>
+<td>Policy enforcement (OPA)</td>
+</tr>
+</tbody>
+</table>
+<h2>Cognitive Guard Layer (CGL)</h2>
+<table>
+<thead>
+<tr>
+<th>Service</th>
+<th>Port</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>intent-registry-service</td>
+<td>50060</td>
+<td>Task intent validation</td>
+</tr>
+<tr>
+<td>cot-auditor-service</td>
+<td>50061</td>
+<td>Chain-of-thought diff</td>
+</tr>
+<tr>
+<td>constraint-injector-service</td>
+<td>50062</td>
+<td>System prompt re-injection</td>
+</tr>
+<tr>
+<td>drift-scorer-service</td>
+<td>50063</td>
+<td>Drift score aggregation</td>
+</tr>
+<tr>
+<td>memory-isolator-service</td>
+<td>50064</td>
+<td>Task memory isolation</td>
+</tr>
+<tr>
+<td>sycophancy-guard-service</td>
+<td>50066</td>
+<td>Constraint erosion detection</td>
+</tr>
+<tr>
+<td>planner-iteration-service</td>
+<td>50067</td>
+<td>Planner loop monitoring</td>
+</tr>
+</tbody>
+</table>
+<h2>Agent Protocols</h2>
+<table>
+<thead>
+<tr>
+<th>Protocol</th>
+<th>Port</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Agent Network Protocol (ANP)</td>
+<td>50069</td>
+<td>Discovery, trust, delegation</td>
+</tr>
+<tr>
+<td>Agent Communication Protocol (ACP)</td>
+<td>50070</td>
+<td>Messaging, pub/sub</td>
+</tr>
+<tr>
+<td>FGA Protocol</td>
+<td>8081</td>
+<td>OpenFGA-compatible API</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>Two-Layer Authorization</h2>
+<p><code>FINAL ALLOW = SpiceDB(ALLOW) AND OPA(ALLOW)</code></p>
+<h3>Layer 1: SpiceDB (ReBAC)</h3>
+<ul>
+<li>Zanzibar tuples: <code>resource#relation@subject</code></li>
+<li>Relationship-based permissions</li>
+<li>Zookies for consistency guarantees</li>
+</ul>
+<h3>Layer 2: OPA Sidecar (Rego)</h3>
+<ul>
+<li><strong>Behavioral Gate</strong>: velocity, anomaly score</li>
+<li><strong>Drift Scoring</strong>: goal deviation, scope creep</li>
+<li><strong>ABAC</strong>: MFA, device trust, IP reputation</li>
+<li><strong>Override Kill Switch</strong>: hard deny on trust &lt; 0.3 or anomaly &gt; 0.9</li>
+</ul>
+<hr />
+<h2>OWASP Agentic Top 10 Coverage</h2>
+<table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>AAGFE Countermeasure</th>
+<th>Latency</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ASI01 Goal Hijack</td>
+<td>behavioral_gate</td>
+<td>&lt;1ms</td>
+</tr>
+<tr>
+<td>ASI02 Tool Abuse</td>
+<td>abac + fraud-pipeline</td>
+<td>&lt;1ms</td>
+</tr>
+<tr>
+<td>ASI03 Privilege Escalation</td>
+<td>spicedb + opa trust</td>
+<td>&lt;1ms</td>
+</tr>
+<tr>
+<td>ASI04 Supply Chain</td>
+<td>drift_scorer</td>
+<td>&lt;1ms</td>
+</tr>
+<tr>
+<td>ASI05 Memory Poisoning</td>
+<td>cot-auditor</td>
+<td>&lt;1ms</td>
+</tr>
+<tr>
+<td>ASI06 Planning Manipulation</td>
+<td>planner-iteration</td>
+<td>&lt;1ms</td>
+</tr>
+<tr>
+<td>ASI07 Multi-Agent Trust</td>
+<td>boundary-enforcer</td>
+<td>&lt;1ms</td>
+</tr>
+<tr>
+<td>ASI08 Over-reliance</td>
+<td>sycophancy-guard</td>
+<td>&lt;1ms</td>
+</tr>
+<tr>
+<td>ASI09 Human Trust Exploit</td>
+<td>decision-service</td>
+<td>&lt;10ms</td>
+</tr>
+<tr>
+<td>ASI10 Rogue Agent</td>
+<td>intent-registry</td>
+<td>&lt;1ms</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>Quick Start</h2>
+<p>```bash</p>
+<h1>1. Configure environment</h1>
+<p>cp .env.example .env</p>
+<h1>2. Start infrastructure + services</h1>
+<p>docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d</p>
+<h1>3. Validate</h1>
+<p>curl -f http://localhost:3001/health
+curl -f http://localhost:8181/health
+```</p>
+<h2>Operational Endpoints</h2>
+<ul>
+<li><code>GET /health</code> — Liveness probe</li>
+<li><code>GET /ready</code> — Readiness check</li>
+<li><code>GET /metrics</code> — Prometheus metrics</li>
+</ul>
+<hr />
+<h2>Documentation</h2>
+<ul>
+<li><a href="./docs/AAGFE-WHITEPAPER.md">Whitepaper</a> — Full specification</li>
+<li><a href="./docs/owasp-mapping.md">OWASP Mapping</a> — Risk mitigation matrix</li>
+<li><a href="./docs/STATUS.md">Status</a> — Implementation checklist</li>
+<li><a href="./docs/references.bib">References</a> — Academic citations</li>
+</ul>
+<hr />
+<h2>Security Properties</h2>
+<ul>
+<li><strong>Least Privilege</strong>: Minimum permissions by default</li>
+<li><strong>Fail Secure</strong>: Deny on any uncertainty</li>
+<li><strong>Behavioral Bounds</strong>: Constrain agent behavior</li>
+<li><strong>Human-in-Loop</strong>: Escalate high-risk to M-of-N reviewers</li>
+<li><strong>Sub-millisecond</strong>: &lt;1ms p99 policy evaluation</li>
+</ul>
+<hr />
+<h2>License</h2>
+<p>Apache 2.0 — OpenAutonomyx (OPC) Private Limited</p>
+    <footer>
+        <p>AAGFE — Agentic Automation Governance For Every Entity</p>
+        <p>Apache 2.0 — OpenAutonomyx (OPC) Private Limited</p>
+    </footer>
+</body>
+</html>
