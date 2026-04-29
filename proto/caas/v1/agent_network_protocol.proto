@@ -1,0 +1,137 @@
+syntax = "proto3";
+
+package aagfe.v1;
+
+option go_package = "github.com/openagx/aagfe/gen/go/caas/v1;caasv1";
+
+import "google/protobuf/timestamp.proto";
+
+// AgentNetworkProtocol (ANP) - Agent-to-agent communication and discovery
+// Supports: discovery, messaging, trust negotiation, delegation
+
+service AgentNetworkProtocolService {
+  // Register an agent on the network
+  rpc RegisterAgent(RegisterAgentRequest) returns (RegisterAgentResponse);
+
+  // Discover agents matching criteria
+  rpc DiscoverAgents(DiscoverAgentsRequest) returns (DiscoverAgentsResponse);
+
+  // Agent-to-agent message
+  rpc SendMessage(AgentMessage) returns (AgentMessageResponse);
+
+  // Establish trust between agents
+  rpc NegotiateTrust(TrustNegotiationRequest) returns (TrustNegotiationResponse);
+
+  // Delegate authority to another agent
+  rpc Delegate(DelegationRequest) returns (DelegationResponse);
+
+  // Verify delegation chain
+  rpc VerifyDelegation(VerifyDelegationRequest) returns (VerifyDelegationResponse);
+
+  // Stream agent events
+  rpc StreamEvents(StreamEventsRequest) returns (stream AgentEvent);
+}
+
+message RegisterAgentRequest {
+  string agent_entity_id = 1;
+  string agent_name = 2;
+  repeated string capabilities = 3;
+  string public_key = 4;
+  string endpoint = 5;
+  map<string, string> metadata = 6;
+}
+
+message RegisterAgentResponse {
+  string network_id = 1;
+  string registered_at = 2;
+  repeated string peer_nodes = 3;
+}
+
+message DiscoverAgentsRequest {
+  repeated string capabilities = 1;
+  int32 limit = 2;
+  string trust_minimum = 3;
+  bool require_delegation_capability = 4;
+}
+
+message DiscoverAgentsResponse {
+  repeated AgentInfo agents = 1;
+}
+
+message AgentInfo {
+  string network_id = 1;
+  string agent_entity_id = 2;
+  string agent_name = 3;
+  repeated string capabilities = 4;
+  string trust_score = 5;
+  bool can_delegate = 6;
+  google.protobuf.Timestamp last_seen = 7;
+}
+
+message AgentMessage {
+  string from_network_id = 1;
+  string to_network_id = 2;
+  string message_type = 3;
+  bytes payload = 4;
+  string correlation_id = 5;
+  google.protobuf.Timestamp sent_at = 6;
+}
+
+message AgentMessageResponse {
+  bool delivered = 1;
+  string delivered_at = 2;
+}
+
+message TrustNegotiationRequest {
+  string initiator_id = 1;
+  string responder_id = 2;
+  string proposed_trust_level = 3;
+  repeated string shared_contexts = 4;
+}
+
+message TrustNegotiationResponse {
+  string negotiation_id = 1;
+  string agreed_trust_level = 2;
+  bool mutual = 3;
+  google.protobuf.Timestamp established_at = 4;
+}
+
+message DelegationRequest {
+  string delegator_id = 1;
+  string delegate_id = 2;
+  string permission_scope = 3;
+  repeated string allowed_resources = 4;
+  google.protobuf.Timestamp expires_at = 5;
+}
+
+message DelegationResponse {
+  string delegation_id = 1;
+  string signature = 2;
+  bool accepted = 3;
+}
+
+message VerifyDelegationRequest {
+  string delegation_id = 1;
+  string resource = 2;
+  string permission = 3;
+}
+
+message VerifyDelegationResponse {
+  bool valid = 1;
+  string delegator_id = 2;
+  string delegate_id = 3;
+  repeated string delegation_chain = 4;
+}
+
+message StreamEventsRequest {
+  string agent_network_id = 1;
+  repeated string event_types = 2;
+}
+
+message AgentEvent {
+  string event_id = 1;
+  string event_type = 2;
+  string source_id = 3;
+  google.protobuf.Timestamp occurred_at = 4;
+  map<string, string> data = 5;
+}
