@@ -46,6 +46,25 @@ services:
 
   # --- Authorization ---
 
+  authz-opa-sidecar:
+    build:
+      context: .
+      dockerfile: services/authz-opa-sidecar/Dockerfile
+    ports:
+      - "8181:8181"
+      - "8182:8182"
+    volumes:
+      - ./services/authz-opa-sidecar/opa:/policy
+      - ./services/authz-opa-sidecar/config.yaml:/config.yaml:ro
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8181/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    profiles:
+      - authz
+
   spicedb-migrate:
     image: authzed/spicedb:latest
     command: migrate head
@@ -330,6 +349,7 @@ services:
       RATE_LIMIT_WINDOW: 1 minute
       ENTITY_ENDPOINT: entity-service:50052
       AUTHZ_ENDPOINT: authz-engine:50051
+      OPA_ENDPOINT: http://authz-opa-sidecar:8181
       TRUST_ENDPOINT: trust-engine:50053
       FRAUD_URL: http://fraud-pipeline:50054
       DECISION_ENDPOINT: decision-service:50055
@@ -345,14 +365,24 @@ services:
       retries: 5
       start_period: 15s
     depends_on:
-      - authz-engine
-      - entity-service
-      - trust-engine
-      - fraud-pipeline
-      - decision-service
-      - federation-service
-      - surplus-engine
-      - did-service
+      authz-opa-sidecar:
+        condition: service_healthy
+      authz-engine:
+        condition: service_healthy
+      entity-service:
+        condition: service_healthy
+      trust-engine:
+        condition: service_healthy
+      fraud-pipeline:
+        condition: service_healthy
+      decision-service:
+        condition: service_healthy
+      federation-service:
+        condition: service_healthy
+      surplus-engine:
+        condition: service_healthy
+      did-service:
+        condition: service_started
     profiles:
       - app
 

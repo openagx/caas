@@ -1,0 +1,34 @@
+{
+  "thresholds": {
+    "anomaly_critical": 0.9,
+    "anomaly_elevated": 0.6,
+    "anomaly_normal": 0.8,
+    "anomaly_high_sensitivity": 0.5,
+    "trust_minimum": 0.3,
+    "trust_for_drift": 0.6,
+    "trust_high_combined": 0.8,
+    "device_trust_min": 0.5,
+    "device_trust_high": 0.8,
+    "ip_reputation_max": 0.7,
+    "ip_reputation_elevated": 0.5,
+    "ip_reputation_suspicious": 0.85,
+    "velocity_5m_max": 150,
+    "velocity_1h_max": 1000,
+    "velocity_5m_high_sensitivity": 50,
+    "drift_max": 0.65,
+    "drift_elevated": 0.5,
+    "drift_moderate": 0.3,
+    "drift_critical": 0.85
+  },
+  "risk_weights": {
+    "anomaly": 0.35,
+    "velocity": 0.2,
+    "drift": 0.25,
+    "context": 0.2
+  },
+  "actions": {
+    "allow": "allow",
+    "step_up_auth": "step_up_auth",
+    "deny": "deny"
+  }
+}

@@ -1,0 +1,43 @@
+# OPA Server Configuration
+# Two-Layer Authorization: SpiceDB (ReBAC) + OPA (ABAC + Behavioral + Drift)
+
+# Bundles - load policy files from local paths
+bundles:
+  authz:
+    path: /policy
+    files:
+      - policy.rego
+      - decision.rego
+      - behavioral_gate.rego
+      - drift_scorer.rego
+      - abac.rego
+      - policy_test.rego
+
+# Server settings
+services:
+  - name: opa
+    url: http://localhost:8181
+    path: /v1/data
+
+# Server configuration
+server:
+  host: 0.0.0.0
+  port: 8181
+
+# Logging
+log:
+  level: info
+  format: json
+
+# Metrics
+metrics:
+  prometheus:
+    enabled: true
+    list_addr: :8182
+
+# Health check
+health:
+  liveness:
+    period: 30s
+  readiness:
+    period: 10s

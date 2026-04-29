@@ -3,6 +3,7 @@ export interface AppConfig {
   port: number;
   entityEndpoint: string;
   authzEndpoint: string;
+  opaEndpoint: string;
   trustEndpoint: string;
   fraudUrl: string;
   decisionEndpoint: string;
@@ -84,6 +85,7 @@ export function loadConfig(): AppConfig {
     port: getInt("API_PORT", 3001, { min: 1, max: 65535 }),
     entityEndpoint: getString("ENTITY_ENDPOINT", "localhost:50052"),
     authzEndpoint: getString("AUTHZ_ENDPOINT", "localhost:50051"),
+    opaEndpoint: getString("OPA_ENDPOINT", "http://localhost:8181"),
     trustEndpoint: getString("TRUST_ENDPOINT", "localhost:50053"),
     fraudUrl: getString("FRAUD_URL", "http://localhost:50054"),
     decisionEndpoint: getString("DECISION_ENDPOINT", "localhost:50055"),
