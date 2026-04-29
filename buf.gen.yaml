@@ -11,3 +11,7 @@ plugins:
   - remote: buf.build/grpc/go
     out: gen/go
     opt: paths=source_relative
+  # TypeScript for api-gateway
+  - remote: buf.build/protocolbuffers/gogotiny
+    out: gen/ts
+    opt: paths=source_relative
