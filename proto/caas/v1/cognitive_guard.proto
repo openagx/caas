@@ -1,0 +1,608 @@
+syntax = "proto3";
+
+package caas.v1;
+
+option go_package = "github.com/OpenAGX/caas/gen/go/caas/v1;caasv1";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+
+// ============================================================
+// 1. IntentRegistryService
+// Stores and validates declared intent for every agent task.
+// Every task MUST register intent before actions are permitted.
+// ============================================================
+service IntentRegistryService {
+  rpc RegisterTask(RegisterTaskRequest)       returns (RegisterTaskResponse);
+  rpc GetTask(GetTaskRequest)                 returns (TaskRecord);
+  rpc UpdateTaskState(UpdateTaskStateRequest) returns (UpdateTaskStateResponse);
+  rpc ValidateAction(ValidateActionRequest)   returns (ValidateActionResponse);
+  rpc CloseTask(CloseTaskRequest)             returns (CloseTaskResponse);
+  rpc ListTasks(ListTasksRequest)             returns (ListTasksResponse);
+}
+
+message RegisterTaskRequest {
+  string agent_entity_id          = 1;
+  string declared_goal            = 2;  // Plain-language goal statement
+  repeated string permitted_tools = 3;  // Allowlist of tool names for this task
+  repeated string permitted_resources = 4; // Zanzibar resource patterns (supports glob)
+  int32  max_turns                = 5;  // 0 = unlimited
+  string parent_task_id           = 6;  // For sub-tasks; empty if root
+  google.protobuf.Struct metadata = 7;  // Arbitrary k/v for caller context
+}
+
+message RegisterTaskResponse {
+  string task_id                   = 1;
+  string intent_hash               = 2;  // SHA-256 of goal + permitted_tools + permitted_resources
+  google.protobuf.Timestamp created_at = 3;
+}
+
+message GetTaskRequest {
+  string task_id = 1;
+}
+
+message TaskRecord {
+  string                   task_id            = 1;
+  string                   agent_entity_id    = 2;
+  string                   declared_goal      = 3;
+  repeated string          permitted_tools    = 4;
+  repeated string          permitted_resources= 5;
+  int32                    max_turns          = 6;
+  int32                    current_turn       = 7;
+  string                   parent_task_id     = 8;
+  TaskState                state              = 9;
+  string                   intent_hash        = 10;
+  google.protobuf.Timestamp created_at        = 11;
+  google.protobuf.Timestamp updated_at        = 12;
+}
+
+enum TaskState {
+  TASK_STATE_UNSPECIFIED = 0;
+  TASK_STATE_ACTIVE      = 1;
+  TASK_STATE_SUSPENDED   = 2;
+  TASK_STATE_COMPLETED   = 3;
+  TASK_STATE_FAILED      = 4;
+  TASK_STATE_REVOKED     = 5;
+}
+
+message UpdateTaskStateRequest {
+  string    task_id   = 1;
+  TaskState new_state = 2;
+  string    reason    = 3;
+}
+
+message UpdateTaskStateResponse {
+  bool   updated    = 1;
+  string updated_id = 2;
+}
+
+message ValidateActionRequest {
+  string task_id   = 1;
+  string tool_name = 2;
+  string resource  = 3;
+}
+
+message ValidateActionResponse {
+  bool   permitted     = 1;
+  string violation     = 2;  // Non-empty if not permitted
+  float  scope_overlap = 3;  // 0.0-1.0 similarity to declared intent scope
+}
+
+message CloseTaskRequest {
+  string    task_id        = 1;
+  TaskState terminal_state = 2;
+  string    summary        = 3;
+}
+
+message CloseTaskResponse {
+  bool   closed   = 1;
+  string task_id  = 2;
+}
+
+message ListTasksRequest {
+  string    agent_entity_id = 1;
+  TaskState filter_state    = 2;
+  int32     page_size       = 3;
+  string    page_token      = 4;
+}
+
+message ListTasksResponse {
+  repeated TaskRecord tasks          = 1;
+  string              next_page_token = 2;
+}
+
+// ============================================================
+// 2. CoTAuditorService
+// Intercepts and diffs chain-of-thought reasoning across turns.
+// Agent runtimes call SubmitReasoning after each LLM completion.
+// ============================================================
+service CoTAuditorService {
+  rpc SubmitReasoning(SubmitReasoningRequest)   returns (SubmitReasoningResponse);
+  rpc GetReasoningHistory(ReasoningHistoryRequest) returns (ReasoningHistoryResponse);
+  rpc ComputeDiff(ReasoningDiffRequest)         returns (ReasoningDiffResponse);
+}
+
+message SubmitReasoningRequest {
+  string task_id            = 1;
+  string agent_entity_id    = 2;
+  int32  turn_number        = 3;
+  string cot_text           = 4;  // Raw chain-of-thought from model
+  string action_taken       = 5;  // Tool call or response that followed
+  google.protobuf.Timestamp occurred_at = 6;
+}
+
+message SubmitReasoningResponse {
+  string reasoning_id          = 1;
+  float  anomaly_score         = 2;  // 0.0-1.0; >0.7 triggers drift signal
+  repeated string anomaly_tags = 3;  // e.g. ["constraint_retracted", "scope_expanded"]
+  bool   drift_event_fired     = 4;
+}
+
+message ReasoningHistoryRequest {
+  string task_id         = 1;
+  int32  last_n_turns    = 2;  // 0 = all
+}
+
+message ReasoningHistoryResponse {
+  repeated ReasoningRecord records = 1;
+}
+
+message ReasoningRecord {
+  string reasoning_id    = 1;
+  int32  turn_number     = 2;
+  string cot_text        = 3;
+  string action_taken    = 4;
+  float  anomaly_score   = 5;
+  repeated string anomaly_tags = 6;
+  google.protobuf.Timestamp occurred_at = 7;
+}
+
+message ReasoningDiffRequest {
+  string task_id    = 1;
+  int32  turn_a     = 2;
+  int32  turn_b     = 3;
+}
+
+message ReasoningDiffResponse {
+  string turn_a_summary     = 1;
+  string turn_b_summary     = 2;
+  float  semantic_drift     = 3;  // 0.0-1.0 cosine distance between embeddings
+  repeated string delta_tags = 4;
+}
+
+// ============================================================
+// 3. ConstraintInjectorService
+// Re-injects system prompt constraints at configurable intervals.
+// Pulls live policy from authz-engine to construct injection fragment.
+// ============================================================
+service ConstraintInjectorService {
+  rpc GetInjectionFragment(InjectionFragmentRequest)   returns (InjectionFragmentResponse);
+  rpc RecordInjection(RecordInjectionRequest)          returns (RecordInjectionResponse);
+  rpc GetInjectionPolicy(InjectionPolicyRequest)       returns (InjectionPolicyResponse);
+  rpc SetInjectionPolicy(SetInjectionPolicyRequest)    returns (SetInjectionPolicyResponse);
+}
+
+message InjectionFragmentRequest {
+  string agent_entity_id = 1;
+  string task_id         = 2;
+  int32  turn_number     = 3;
+}
+
+message InjectionFragmentResponse {
+  bool   injection_required  = 1;
+  string fragment_text       = 2;  // Ready to prepend to next system prompt
+  string fragment_hash       = 3;  // SHA-256 for idempotency
+  InjectionReason reason     = 4;
+}
+
+enum InjectionReason {
+  INJECTION_REASON_UNSPECIFIED  = 0;
+  INJECTION_REASON_SCHEDULED    = 1;  // Regular interval
+  INJECTION_REASON_DRIFT_SIGNAL = 2;  // Triggered by drift-scorer
+  INJECTION_REASON_MANUAL       = 3;  // Operator override
+}
+
+message RecordInjectionRequest {
+  string task_id      = 1;
+  int32  turn_number  = 2;
+  string fragment_hash = 3;
+  bool   acknowledged  = 4;  // Did the agent runtime confirm receipt?
+}
+
+message RecordInjectionResponse {
+  bool   recorded     = 1;
+  string injection_id = 2;
+}
+
+message InjectionPolicyRequest {
+  string agent_entity_id = 1;
+}
+
+message InjectionPolicyResponse {
+  int32  injection_interval_turns = 1;  // Re-inject every N turns
+  int32  drift_score_threshold    = 2;  // Force inject if score exceeds this
+  bool   enabled                  = 3;
+}
+
+message SetInjectionPolicyRequest {
+  string agent_entity_id          = 1;
+  int32  injection_interval_turns = 2;
+  int32  drift_score_threshold    = 3;
+  bool   enabled                  = 4;
+}
+
+message SetInjectionPolicyResponse {
+  bool updated = 1;
+}
+
+// ============================================================
+// 4. DriftScorerService
+// Aggregates signals from all CGL services and fraud-pipeline
+// into a single 0-1000 score mirroring trust-engine's scale.
+// ============================================================
+service DriftScorerService {
+  rpc ComputeScore(ComputeScoreRequest)       returns (ComputeScoreResponse);
+  rpc GetCurrentScore(CurrentScoreRequest)    returns (CurrentScoreResponse);
+  rpc GetScoreHistory(ScoreHistoryRequest)    returns (ScoreHistoryResponse);
+  rpc StreamScoreUpdates(ScoreStreamRequest)  returns (stream ScoreUpdate);
+}
+
+message ComputeScoreRequest {
+  string agent_entity_id = 1;
+  string task_id         = 2;
+  // Provide latest signal values; scorer maintains weighted rolling average
+  repeated SignalInput signals = 3;
+}
+
+message SignalInput {
+  string signal_source = 1;  // e.g. "cot_auditor", "intent_registry", "fraud_pipeline"
+  string signal_type   = 2;
+  float  raw_value     = 3;  // 0.0-1.0 normalised
+  float  weight        = 4;  // Override default weight; 0 = use default
+}
+
+message ComputeScoreResponse {
+  int32  drift_score          = 1;  // 0-1000
+  string dominant_signal      = 2;  // Signal contributing most to score
+  repeated ScoreDimension dimensions = 3;
+  google.protobuf.Timestamp computed_at = 4;
+}
+
+message ScoreDimension {
+  string dimension  = 1;
+  int32  score      = 2;   // 0-1000 per dimension
+  float  weight     = 3;
+}
+
+message CurrentScoreRequest {
+  string agent_entity_id = 1;
+  string task_id         = 2;
+}
+
+message CurrentScoreResponse {
+  int32  drift_score   = 1;
+  google.protobuf.Timestamp as_of = 2;
+}
+
+message ScoreHistoryRequest {
+  string agent_entity_id = 1;
+  string task_id         = 2;
+  int32  last_n          = 3;
+}
+
+message ScoreHistoryResponse {
+  repeated ScoreSnapshot snapshots = 1;
+}
+
+message ScoreSnapshot {
+  int32  drift_score   = 1;
+  google.protobuf.Timestamp captured_at = 2;
+}
+
+message ScoreStreamRequest {
+  string agent_entity_id = 1;
+  string task_id         = 2;
+}
+
+message ScoreUpdate {
+  string agent_entity_id = 1;
+  string task_id         = 2;
+  int32  drift_score     = 3;
+  string dominant_signal = 4;
+  google.protobuf.Timestamp updated_at = 5;
+}
+
+// ============================================================
+// 5. MemoryIsolatorService
+// Enforces episodic memory boundaries.
+// Integrates with entity-service lifecycle events.
+// ============================================================
+service MemoryIsolatorService {
+  rpc CreateBoundary(CreateBoundaryRequest)   returns (CreateBoundaryResponse);
+  rpc CheckBleed(CheckBleedRequest)           returns (CheckBleedResponse);
+  rpc EnforceBoundary(EnforceBoundaryRequest) returns (EnforceBoundaryResponse);
+  rpc ListBoundaries(ListBoundariesRequest)   returns (ListBoundariesResponse);
+}
+
+message CreateBoundaryRequest {
+  string agent_entity_id    = 1;
+  string task_id            = 2;
+  BoundaryType type         = 3;
+  repeated string excluded_context_keys = 4;  // Memory keys to exclude from next task
+}
+
+enum BoundaryType {
+  BOUNDARY_TYPE_UNSPECIFIED    = 0;
+  BOUNDARY_TYPE_TASK_COMPLETE  = 1;  // Clean slate on task completion
+  BOUNDARY_TYPE_SUSPENSION     = 2;  // Triggered by entity lifecycle suspension
+  BOUNDARY_TYPE_MANUAL         = 3;  // Operator override
+  BOUNDARY_TYPE_DRIFT_TRIGGER  = 4;  // Triggered by drift-scorer crossing threshold
+}
+
+message CreateBoundaryResponse {
+  string boundary_id = 1;
+  google.protobuf.Timestamp created_at = 2;
+}
+
+message CheckBleedRequest {
+  string agent_entity_id    = 1;
+  string current_task_id    = 2;
+  string context_key        = 3;  // Memory key being accessed
+}
+
+message CheckBleedResponse {
+  bool   bleed_detected  = 1;
+  string origin_task_id  = 2;  // Where this context originated
+  string boundary_id     = 3;  // Boundary that should have blocked it
+}
+
+message EnforceBoundaryRequest {
+  string boundary_id = 1;
+  bool   dry_run     = 2;
+}
+
+message EnforceBoundaryResponse {
+  bool   enforced               = 1;
+  int32  context_keys_cleared   = 2;
+  repeated string cleared_keys  = 3;
+}
+
+message ListBoundariesRequest {
+  string agent_entity_id = 1;
+  int32  page_size       = 2;
+  string page_token      = 3;
+}
+
+message ListBoundariesResponse {
+  repeated BoundaryRecord boundaries = 1;
+  string next_page_token             = 2;
+}
+
+message BoundaryRecord {
+  string       boundary_id     = 1;
+  string       task_id         = 2;
+  BoundaryType type            = 3;
+  bool         enforced        = 4;
+  google.protobuf.Timestamp created_at = 5;
+}
+
+// ============================================================
+// 6. SycophancyGuardService
+// Detects constraint erosion from user pressure across turns.
+// Pattern-matches for retracted refusals and softened limits.
+// ============================================================
+service SycophancyGuardService {
+  rpc EvaluateTurn(EvaluateTurnRequest)       returns (EvaluateTurnResponse);
+  rpc GetGuardHistory(GuardHistoryRequest)    returns (GuardHistoryResponse);
+  rpc FlagForReview(FlagForReviewRequest)     returns (FlagForReviewResponse);
+}
+
+message EvaluateTurnRequest {
+  string task_id            = 1;
+  string agent_entity_id    = 2;
+  int32  turn_number        = 3;
+  string user_message       = 4;
+  string agent_response     = 5;
+  string prior_refusal      = 6;   // Agent's previous refusal text, if any
+}
+
+message EvaluateTurnResponse {
+  bool                  sycophancy_detected = 1;
+  SycophancyPattern     pattern             = 2;
+  float                 confidence          = 3;  // 0.0-1.0
+  string                detail              = 4;
+  bool                  escalated_to_review = 5;
+  string                review_token        = 6;
+}
+
+enum SycophancyPattern {
+  SYCOPHANCY_PATTERN_UNSPECIFIED        = 0;
+  SYCOPHANCY_PATTERN_RETRACTED_REFUSAL  = 1;  // Previously refused; now complying
+  SYCOPHANCY_PATTERN_SOFTENED_CONSTRAINT= 2;  // Hard limit weakened to suggestion
+  SYCOPHANCY_PATTERN_SCOPE_EXPANSION    = 3;  // Agreed to do more than permitted
+  SYCOPHANCY_PATTERN_AUTHORITY_OVERRIDE = 4;  // User claimed authority to override policy
+  SYCOPHANCY_PATTERN_PERSISTENCE_YIELD  = 5;  // Caved after repeated user pressure
+}
+
+message GuardHistoryRequest {
+  string task_id         = 1;
+  int32  last_n_turns    = 2;
+}
+
+message GuardHistoryResponse {
+  repeated GuardRecord records = 1;
+}
+
+message GuardRecord {
+  string            task_id            = 1;
+  int32             turn_number        = 2;
+  SycophancyPattern pattern            = 3;
+  float             confidence         = 4;
+  string            detail             = 5;
+  google.protobuf.Timestamp occurred_at = 6;
+}
+
+message FlagForReviewRequest {
+  string task_id         = 1;
+  string agent_entity_id = 2;
+  int32  turn_number     = 3;
+  string reason          = 4;
+}
+
+message FlagForReviewResponse {
+  bool   flagged       = 1;
+  string review_token  = 2;  // Pass to decision-service for M-of-N approval
+}
+
+// ============================================================
+// 7. PlannerIterationService — port 50068
+//
+// NEW FIRST-CLASS CGL CONCEPT — introduced via SK integration.
+//
+// Captures IAutoFunctionInvocationFilter signals as structured
+// planner iteration events. Each event represents one LLM
+// "think step" in a planner loop — the reasoning layer BEFORE
+// tool selection.
+//
+// Published to cognitive-drift-events as:
+//   event_type: PLANNER_ITERATION_OBSERVED
+//
+// Consumed by:
+//   - cot-auditor    (reasoning diff across iterations)
+//   - drift-scorer   (PLANNER_SIGNAL_* weighted contributions)
+//   - fraud-pipeline (loop anomaly + function hallucination patterns)
+//
+// This service is runtime-agnostic — SK, AK, LangGraph, CrewAI
+// can all emit planner iteration events using this contract.
+// ============================================================
+service PlannerIterationService {
+  // Record a single planner iteration event.
+  // Called by SK adapter's AutoFunctionInvocationFilter
+  // and equivalents in other runtimes.
+  rpc RecordIteration(PlannerIterationRequest) returns (PlannerIterationResponse);
+
+  // Get the full iteration history for a task.
+  rpc GetIterationHistory(IterationHistoryRequest) returns (IterationHistoryResponse);
+
+  // Get iteration-level drift summary for a task.
+  rpc GetIterationDrift(IterationDriftRequest) returns (IterationDriftResponse);
+
+  // Stream live iteration events for a task (for real-time monitoring).
+  rpc StreamIterations(StreamIterationsRequest) returns (stream PlannerIterationEvent);
+}
+
+message PlannerIterationRequest {
+  string agent_entity_id    = 1;
+  string task_id            = 2;
+  int32  turn_number        = 3;
+  int32  iteration_number   = 4;
+
+  // Full chat history at this iteration point.
+  // Last message is the LLM's current reasoning turn.
+  repeated IterationMessage chat_history   = 5;
+
+  // What the LLM chose this iteration
+  string requested_function  = 6;
+  string requested_plugin    = 7;
+  string requested_args_json = 8;
+
+  // Available function count — used for hallucination detection
+  int32  function_count      = 9;
+  bool   is_final_iteration  = 10;
+
+  // Runtime that produced this event
+  string runtime             = 11;  // "sk_dotnet", "sk_python", "langgraph", "crewai", etc.
+  string session_id          = 12;
+
+  google.protobuf.Timestamp occurred_at = 13;
+}
+
+message IterationMessage {
+  string role    = 1;
+  string content = 2;
+  string name    = 3;
+}
+
+message PlannerIterationResponse {
+  string iteration_event_id    = 1;
+  float  reasoning_anomaly_score = 2;  // 0.0-1.0 from cot-auditor
+  int32  updated_drift_score   = 3;
+  repeated IterationSignal signals = 4;
+
+  // Directive back to the runtime
+  IterationDirective directive  = 5;
+  string constraint_fragment    = 6;  // Non-empty if INJECT directive
+  bool   terminate_planner      = 7;
+  string reason                 = 8;
+}
+
+enum IterationDirective {
+  ITERATION_DIRECTIVE_UNSPECIFIED = 0;
+  ITERATION_DIRECTIVE_CONTINUE    = 1;
+  ITERATION_DIRECTIVE_INJECT      = 2;  // Continue + inject constraints
+  ITERATION_DIRECTIVE_REVIEW      = 3;  // Pause for M-of-N human review
+  ITERATION_DIRECTIVE_TERMINATE   = 4;  // Stop planner loop
+}
+
+message IterationSignal {
+  IterationSignalType type   = 1;
+  float               weight = 2;
+  string              detail = 3;
+  int32               iteration_number = 4;
+}
+
+enum IterationSignalType {
+  ITERATION_SIGNAL_UNSPECIFIED            = 0;
+  ITERATION_SIGNAL_GOAL_DEVIATION         = 1;
+  ITERATION_SIGNAL_CONSTRAINT_EROSION     = 2;
+  ITERATION_SIGNAL_SCOPE_CREEP            = 3;
+  ITERATION_SIGNAL_AUTHORITY_CLAIM        = 4;
+  ITERATION_SIGNAL_LOOP_ANOMALY           = 5;
+  ITERATION_SIGNAL_FUNCTION_HALLUCINATION = 6;
+  ITERATION_SIGNAL_REASONING_REVERSAL     = 7;
+}
+
+message PlannerIterationEvent {
+  string              iteration_event_id     = 1;
+  string              agent_entity_id        = 2;
+  string              task_id                = 3;
+  int32               turn_number            = 4;
+  int32               iteration_number       = 5;
+  string              requested_function     = 6;
+  float               reasoning_anomaly_score= 7;
+  int32               drift_score            = 8;
+  repeated IterationSignal signals           = 9;
+  IterationDirective  directive              = 10;
+  string              runtime               = 11;
+  google.protobuf.Timestamp occurred_at     = 12;
+}
+
+message IterationHistoryRequest {
+  string task_id      = 1;
+  int32  last_n       = 2;
+}
+
+message IterationHistoryResponse {
+  repeated PlannerIterationEvent events = 1;
+}
+
+message IterationDriftRequest {
+  string task_id = 1;
+}
+
+message IterationDriftResponse {
+  string  task_id                      = 1;
+  int32   total_iterations             = 2;
+  float   avg_reasoning_anomaly_score  = 3;
+  int32   peak_drift_score             = 4;
+  int32   constraint_erosion_count     = 5;
+  int32   scope_creep_count            = 6;
+  int32   hallucination_count          = 7;
+  int32   loop_anomaly_count           = 8;
+  int32   terminated_by_caas           = 9;
+}
+
+message StreamIterationsRequest {
+  string agent_entity_id = 1;
+  string task_id         = 2;
+}

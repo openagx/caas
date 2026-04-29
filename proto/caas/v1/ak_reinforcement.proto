@@ -1,0 +1,394 @@
+syntax = "proto3";
+
+package caas.v1;
+
+option go_package = "github.com/OpenAGX/caas/gen/go/caas/v1;caasv1";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+
+// ============================================================
+// AKReinforcementService — port 50066
+//
+// The Agent Kernel (AK) reinforcement adapter.
+// Sits as a sidecar alongside every AK deployment.
+//
+// Design assumptions (locked):
+//   1. AK guardrails are keyword-based → CGL provides semantic
+//      layer on top. No redundancy. Full complement.
+//   2. AK hooks are post-tool only → this adapter provides the
+//      pre-tool intercept that AK does not. AK calls
+//      PreToolIntercept synchronously before dispatching any tool.
+//   3. AK session API is get/set by key only → this adapter owns
+//      scoped enumeration and clear. AK calls PurgeTaskMemory on
+//      task close; adapter manages the key registry internally.
+//
+// Integration contract with AK:
+//   AK must call:
+//     PreToolIntercept  — before every tool dispatch (sync, blocking)
+//     PostToolRecord    — after every tool completion (async)
+//     SubmitCompletion  — after every LLM completion (async)
+//     RegisterTask      — at task start (sync)
+//     CloseTask         — at task end (sync)
+//     PurgeTaskMemory   — at task end, after CloseTask (sync)
+//     CheckA2A          — before every A2A message dispatch (sync)
+//     InjectConstraints — AK calls this; adapter returns fragment
+//                         to prepend to next system prompt
+// ============================================================
+
+service AKReinforcementService {
+  // ── Pre-tool intercept (fills AK's missing pre-hook) ────────
+  // AK calls this synchronously before dispatching any tool.
+  // BLOCK verdict = AK must not dispatch the tool.
+  // WARN/STRONG_WARN = AK dispatches but logs + routes to review.
+  rpc PreToolIntercept(PreToolInterceptRequest) returns (PreToolInterceptResponse);
+
+  // ── Post-tool record (supplements AK's existing post-hook) ──
+  // AK calls this after tool completion. Async — never blocks.
+  rpc PostToolRecord(PostToolRecordRequest) returns (PostToolRecordResponse);
+
+  // ── LLM completion submission ────────────────────────────────
+  // AK calls this after every LLM completion with the full
+  // chain-of-thought. Async — never blocks.
+  rpc SubmitCompletion(SubmitCompletionRequest) returns (SubmitCompletionResponse);
+
+  // ── Task lifecycle ───────────────────────────────────────────
+  rpc RegisterTask(AKRegisterTaskRequest) returns (AKRegisterTaskResponse);
+  rpc CloseTask(AKCloseTaskRequest) returns (AKCloseTaskResponse);
+
+  // ── Memory isolation (owns what AK session API cannot) ──────
+  // AK calls this on task close. Adapter enumerates all keys
+  // registered under task_id and calls AK session delete for each.
+  rpc PurgeTaskMemory(PurgeTaskMemoryRequest) returns (PurgeTaskMemoryResponse);
+
+  // ── Session key registry (called by AK on every session write)
+  // Adapter maintains a task-scoped key registry since AK
+  // session API has no enumeration capability.
+  rpc RegisterSessionKey(RegisterSessionKeyRequest) returns (RegisterSessionKeyResponse);
+
+  // ── A2A intercept ────────────────────────────────────────────
+  // AK calls this before every A2A message dispatch.
+  // Closes the lateral movement surface in multi-agent topologies.
+  rpc CheckA2A(A2ACheckRequest) returns (A2ACheckResponse);
+
+  // ── Semantic guardrail layer (complements AK keyword guardrails)
+  // AK calls this where its keyword guardrail would fire.
+  // Adapter runs semantic/embedding check on top.
+  // Returns PASS, AUGMENT (add CGL constraints), or BLOCK.
+  rpc SemanticGuardrailCheck(SemanticGuardrailRequest) returns (SemanticGuardrailResponse);
+
+  // ── Constraint injection ─────────────────────────────────────
+  // AK calls this before constructing the next system prompt.
+  // Adapter returns a fragment to prepend — sourced from
+  // constraint-injector based on current drift score.
+  rpc InjectConstraints(InjectConstraintsRequest) returns (InjectConstraintsResponse);
+
+  // ── Health ───────────────────────────────────────────────────
+  rpc Health(HealthRequest) returns (HealthResponse);
+}
+
+// ── PreToolIntercept ─────────────────────────────────────────────────────
+
+message PreToolInterceptRequest {
+  string agent_entity_id  = 1;
+  string task_id          = 2;
+  int32  turn_number      = 3;
+  string tool_name        = 4;
+  string resource         = 5;  // Zanzibar format: resource_type:resource_id
+  string parameters_json  = 6;
+  string session_id       = 7;  // AK session ID for correlation
+  // AK framework that produced this call
+  AKFramework framework   = 8;
+}
+
+enum AKFramework {
+  AK_FRAMEWORK_UNSPECIFIED  = 0;
+  AK_FRAMEWORK_LANGGRAPH    = 1;
+  AK_FRAMEWORK_OPENAI_AGENTS= 2;
+  AK_FRAMEWORK_CREWAI       = 3;
+  AK_FRAMEWORK_GOOGLE_ADK   = 4;
+}
+
+message PreToolInterceptResponse {
+  // BLOCK = AK must abort dispatch. ALLOW = proceed. WARN = proceed + log.
+  InterceptVerdict verdict         = 1;
+  string           reason          = 2;
+  int32            drift_score     = 3;
+  repeated string  active_signals  = 4;
+  // If STRONG_WARN or BLOCK: review token for decision-service.
+  string           review_token    = 5;
+  // Remediation AK should apply before retrying (if any).
+  AKRemediation    remediation     = 6;
+}
+
+enum InterceptVerdict {
+  INTERCEPT_VERDICT_UNSPECIFIED  = 0;
+  INTERCEPT_VERDICT_ALLOW        = 1;
+  INTERCEPT_VERDICT_WARN         = 2;
+  INTERCEPT_VERDICT_STRONG_WARN  = 3;
+  INTERCEPT_VERDICT_BLOCK        = 4;
+}
+
+enum AKRemediation {
+  AK_REMEDIATION_UNSPECIFIED       = 0;
+  AK_REMEDIATION_NONE              = 1;
+  AK_REMEDIATION_INJECT_NEXT_TURN  = 2;  // Prepend constraint fragment next turn
+  AK_REMEDIATION_RESET_SESSION     = 3;  // AK should reset its session store
+  AK_REMEDIATION_ESCALATE_HUMAN    = 4;  // Route to decision-service M-of-N
+  AK_REMEDIATION_SUSPEND           = 5;  // AK should halt agent execution
+}
+
+// ── PostToolRecord ────────────────────────────────────────────────────────
+
+message PostToolRecordRequest {
+  string agent_entity_id  = 1;
+  string task_id          = 2;
+  int32  turn_number      = 3;
+  string tool_name        = 4;
+  string resource         = 5;
+  ToolOutcome outcome     = 6;
+  string result_summary   = 7;   // Non-PII summary of tool result
+  int64  duration_ms      = 8;
+  string session_id       = 9;
+}
+
+enum ToolOutcome {
+  TOOL_OUTCOME_UNSPECIFIED = 0;
+  TOOL_OUTCOME_SUCCESS     = 1;
+  TOOL_OUTCOME_FAILED      = 2;
+  TOOL_OUTCOME_TIMEOUT     = 3;
+  TOOL_OUTCOME_BLOCKED     = 4;  // Blocked by PreToolIntercept
+}
+
+message PostToolRecordResponse {
+  bool   recorded    = 1;
+  string record_id   = 2;
+}
+
+// ── SubmitCompletion ──────────────────────────────────────────────────────
+
+message SubmitCompletionRequest {
+  string agent_entity_id  = 1;
+  string task_id          = 2;
+  int32  turn_number      = 3;
+  // Chain-of-thought text from LLM completion.
+  // AK extracts this from its verbose trace output.
+  string cot_text         = 4;
+  // The tool call or response that followed.
+  string action_taken     = 5;
+  // AK's own keyword guardrail verdict for this completion.
+  // Adapter uses this to calibrate semantic layer.
+  AKGuardrailVerdict ak_guardrail_verdict = 6;
+  // Keywords AK's guardrail flagged (may be empty).
+  repeated string ak_flagged_keywords     = 7;
+  string session_id       = 8;
+}
+
+enum AKGuardrailVerdict {
+  AK_GUARDRAIL_UNSPECIFIED = 0;
+  AK_GUARDRAIL_PASS        = 1;
+  AK_GUARDRAIL_FLAGGED     = 2;
+  AK_GUARDRAIL_BLOCKED     = 3;
+}
+
+message SubmitCompletionResponse {
+  // Anomaly score from cot-auditor (0.0-1.0).
+  float  anomaly_score         = 1;
+  // Updated drift score after this completion.
+  int32  updated_drift_score   = 2;
+  // Whether constraint injection is recommended next turn.
+  bool   inject_next_turn      = 3;
+  repeated string anomaly_tags = 4;
+}
+
+// ── Task Lifecycle ────────────────────────────────────────────────────────
+
+message AKRegisterTaskRequest {
+  string agent_entity_id          = 1;
+  string session_id               = 2;   // AK session ID
+  string declared_goal            = 3;
+  repeated string permitted_tools = 4;   // From AK's MCP tool bindings
+  repeated string permitted_resources = 5;
+  int32  max_turns                = 6;
+  string parent_task_id           = 7;
+  AKFramework framework           = 8;
+  google.protobuf.Struct ak_agent_config = 9;  // AK agent definition (sanitised)
+}
+
+message AKRegisterTaskResponse {
+  string task_id      = 1;
+  string intent_hash  = 2;
+  // Initial constraint fragment to prepend to first system prompt.
+  string initial_constraint_fragment = 3;
+}
+
+message AKCloseTaskRequest {
+  string task_id      = 1;
+  string session_id   = 2;
+  TaskCloseReason reason = 3;
+  string summary      = 4;
+}
+
+enum TaskCloseReason {
+  TASK_CLOSE_REASON_UNSPECIFIED = 0;
+  TASK_CLOSE_REASON_COMPLETED   = 1;
+  TASK_CLOSE_REASON_FAILED      = 2;
+  TASK_CLOSE_REASON_TIMEOUT     = 3;
+  TASK_CLOSE_REASON_SUSPENDED   = 4;
+  TASK_CLOSE_REASON_USER_ABORT  = 5;
+}
+
+message AKCloseTaskResponse {
+  bool   closed          = 1;
+  int32  final_drift_score = 2;
+  int32  total_turns     = 3;
+  int32  blocked_actions = 4;
+  int32  injections_sent = 5;
+}
+
+// ── Memory Isolation ──────────────────────────────────────────────────────
+
+message RegisterSessionKeyRequest {
+  string task_id      = 1;
+  string session_id   = 2;
+  string key          = 3;   // Session key being written by AK
+  KeySensitivity sensitivity = 4;
+}
+
+enum KeySensitivity {
+  KEY_SENSITIVITY_UNSPECIFIED = 0;
+  KEY_SENSITIVITY_NORMAL      = 1;
+  KEY_SENSITIVITY_HIGH        = 2;  // PII or cross-task risk
+}
+
+message RegisterSessionKeyResponse {
+  bool   registered = 1;
+  bool   bleed_risk = 2;  // True if key was seen in a prior closed task
+  string origin_task_id = 3;  // Non-empty if bleed_risk
+}
+
+message PurgeTaskMemoryRequest {
+  string task_id    = 1;
+  string session_id = 2;
+  bool   dry_run    = 3;
+  // AK session store type — adapter uses appropriate delete strategy
+  AKSessionStore session_store = 4;
+}
+
+enum AKSessionStore {
+  AK_SESSION_STORE_UNSPECIFIED = 0;
+  AK_SESSION_STORE_IN_MEMORY   = 1;
+  AK_SESSION_STORE_REDIS       = 2;
+  AK_SESSION_STORE_DYNAMODB    = 3;
+  AK_SESSION_STORE_COSMOSDB    = 4;
+}
+
+message PurgeTaskMemoryResponse {
+  int32           keys_purged      = 1;
+  repeated string purged_keys      = 2;
+  int32           bleed_keys_found = 3;  // Keys that had cross-task origins
+  bool            dry_run          = 4;
+}
+
+// ── A2A Intercept ─────────────────────────────────────────────────────────
+
+message A2ACheckRequest {
+  string sender_agent_entity_id   = 1;
+  string receiver_agent_entity_id = 2;
+  string sender_task_id           = 3;
+  string message_type             = 4;  // AK A2A message type
+  string payload_json             = 5;
+  // Is this message crossing a sovereign boundary?
+  bool   cross_sovereign          = 6;
+  string session_id               = 7;
+}
+
+message A2ACheckResponse {
+  InterceptVerdict verdict        = 1;
+  string           reason         = 2;
+  // If cross_sovereign: federation-service relay token required.
+  string           relay_token    = 3;
+  // Drift contribution from this A2A message pattern.
+  float            lateral_risk_score = 4;  // 0.0-1.0
+}
+
+// ── Semantic Guardrail ────────────────────────────────────────────────────
+// Complements AK's keyword guardrails with embedding-based detection.
+// AK passes its own verdict + flagged keywords for calibration.
+
+message SemanticGuardrailRequest {
+  string agent_entity_id          = 1;
+  string task_id                  = 2;
+  string content                  = 3;   // Text to evaluate
+  GuardrailContentType content_type = 4;
+  // AK's keyword verdict — adapter uses to calibrate threshold
+  AKGuardrailVerdict ak_verdict   = 5;
+  repeated string ak_keywords     = 6;
+}
+
+enum GuardrailContentType {
+  GUARDRAIL_CONTENT_TYPE_UNSPECIFIED   = 0;
+  GUARDRAIL_CONTENT_TYPE_USER_MESSAGE  = 1;
+  GUARDRAIL_CONTENT_TYPE_AGENT_RESPONSE= 2;
+  GUARDRAIL_CONTENT_TYPE_TOOL_INPUT    = 3;
+  GUARDRAIL_CONTENT_TYPE_TOOL_OUTPUT   = 4;
+}
+
+message SemanticGuardrailResponse {
+  SemanticVerdict  verdict          = 1;
+  float            risk_score       = 2;  // 0.0-1.0
+  repeated string  triggered_policies = 3;
+  // If AUGMENT: additional constraints to inject into system prompt.
+  string           constraint_fragment = 4;
+  string           reason           = 5;
+}
+
+enum SemanticVerdict {
+  SEMANTIC_VERDICT_UNSPECIFIED = 0;
+  SEMANTIC_VERDICT_PASS        = 1;
+  SEMANTIC_VERDICT_AUGMENT     = 2;  // Pass + inject additional constraints
+  SEMANTIC_VERDICT_BLOCK       = 3;
+}
+
+// ── Constraint Injection ──────────────────────────────────────────────────
+
+message InjectConstraintsRequest {
+  string agent_entity_id = 1;
+  string task_id         = 2;
+  int32  turn_number     = 3;
+  // AK's current system prompt hash — adapter checks if fragment
+  // already present (idempotency).
+  string system_prompt_hash = 4;
+}
+
+message InjectConstraintsResponse {
+  bool   injection_required = 1;
+  string fragment_text      = 2;
+  string fragment_hash      = 3;
+  // Where in the system prompt to insert (AK handles the actual prepend).
+  InjectionPosition position = 4;
+}
+
+enum InjectionPosition {
+  INJECTION_POSITION_UNSPECIFIED = 0;
+  INJECTION_POSITION_PREPEND     = 1;
+  INJECTION_POSITION_APPEND      = 2;
+  INJECTION_POSITION_AFTER_ROLE  = 3;  // After role definition, before tools
+}
+
+// ── Health ────────────────────────────────────────────────────────────────
+
+message HealthRequest {}
+
+message HealthResponse {
+  bool   healthy              = 1;
+  // Per-CGL-service health
+  repeated ServiceHealth services = 2;
+  google.protobuf.Timestamp checked_at = 3;
+}
+
+message ServiceHealth {
+  string service = 1;
+  bool   healthy = 2;
+  int64  latency_ms = 3;
+}

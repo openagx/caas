@@ -1,0 +1,471 @@
+syntax = "proto3";
+
+package caas.v1;
+
+option go_package = "github.com/OpenAGX/caas/gen/go/caas/v1;caasv1";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+
+// ============================================================
+// AutoGenReinforcementService — port 50069
+//
+// AutoGen v0.4 reinforcement adapter for CAAS v2 CGL.
+//
+// AutoGen v0.4 architectural model:
+//   - Distributed actor model (Orleans-derived)
+//   - Every inter-agent communication is a typed message
+//   - Message interceptors fire on ALL messages — pre and post
+//   - State is serialized via save_state / load_state per agent
+//   - Termination conditions are first-class, pluggable
+//   - CancellationToken propagates through full actor graph
+//
+// AutoGen v0.4 advantages over SK and AK for CGL:
+//   1. Message interceptors cover ALL inter-agent communication
+//      natively — best A2A interception surface of all runtimes.
+//   2. save_state / load_state gives memory-isolator a full state
+//      snapshot API — no key registry workaround needed.
+//   3. Termination conditions are pluggable — CGL TERMINATE
+//      directive hooks in as a first-class condition.
+//   4. Actor model means every agent has an explicit identity
+//      and message address — maps cleanly to CAAS entity types.
+//   5. ChatCompletionContext provides full history structurally.
+//
+// Gaps vs SK:
+//   - No IAutoFunctionInvocationFilter equivalent (no per-iteration
+//     reasoning hook before tool selection). CGL compensates via
+//     MessageInterceptor on tool_call message type.
+//   - No IPromptRenderFilter. Constraint injection via system
+//     message prepend on each round.
+//
+// New concepts introduced:
+//   - AgentActorEvent: maps AutoGen actor messages to CGL events
+//   - TerminationCondition: CGL-native pluggable condition
+//   - StateBoundary: wraps save_state/load_state for isolation
+// ============================================================
+
+service AutoGenReinforcementService {
+
+  // ── Message interceptor (pre + post, covers ALL messages) ───
+  // AutoGen message interceptor calls this for every agent message.
+  // This is the primary enforcement point — replaces both
+  // pre-tool hook (SK) and A2A hook (AK) in a single RPC.
+  rpc MessageIntercept(MessageInterceptRequest)
+      returns (MessageInterceptResponse);
+
+  // ── Tool call intercept ──────────────────────────────────────
+  // Specific intercept for tool_call messages — fires before
+  // the agent executes a tool. Supplements MessageIntercept
+  // with tool-specific drift signals.
+  rpc ToolCallIntercept(ToolCallInterceptRequest)
+      returns (ToolCallInterceptResponse);
+
+  // ── Completion hook ──────────────────────────────────────────
+  // Called after every LLM completion with ChatCompletionContext.
+  // AutoGen provides full structured history — no scraping.
+  // Feeds cot-auditor and planner-iteration service.
+  rpc CompletionHook(CompletionHookRequest)
+      returns (CompletionHookResponse);
+
+  // ── Termination condition ────────────────────────────────────
+  // AutoGen pluggable termination condition backed by CGL.
+  // AutoGen calls ShouldTerminate on each message round.
+  // Returns true when drift score breaches BLOCK threshold
+  // or when explicit TERMINATE directive is active.
+  rpc ShouldTerminate(ShouldTerminateRequest)
+      returns (ShouldTerminateResponse);
+
+  // ── Task lifecycle ───────────────────────────────────────────
+  rpc RegisterTask(AutoGenRegisterTaskRequest)  returns (AutoGenRegisterTaskResponse);
+  rpc CloseTask(AutoGenCloseTaskRequest)        returns (AutoGenCloseTaskResponse);
+
+  // ── State boundary (wraps save_state / load_state) ──────────
+  // AutoGen calls these before/after state serialization.
+  // memory-isolator uses full state snapshot — no key registry.
+  rpc PreStateSave(StateSaveRequest)   returns (StateSaveResponse);
+  rpc PostStateLoad(StateLoadRequest)  returns (StateLoadResponse);
+
+  // ── Actor registration ───────────────────────────────────────
+  // Register an AutoGen agent actor as a CAAS entity.
+  // Maps AutoGen AgentId to CAAS entity_id (AI_AGENT type).
+  rpc RegisterActor(RegisterActorRequest)   returns (RegisterActorResponse);
+  rpc DeregisterActor(DeregisterActorRequest) returns (DeregisterActorResponse);
+
+  // ── Semantic guardrail ───────────────────────────────────────
+  rpc SemanticGuardrailCheck(AutoGenGuardrailRequest)
+      returns (AutoGenGuardrailResponse);
+
+  // ── Health ───────────────────────────────────────────────────
+  rpc Health(AutoGenHealthRequest) returns (AutoGenHealthResponse);
+}
+
+// ── MessageIntercept ──────────────────────────────────────────────────────
+// Central intercept for all AutoGen inter-agent messages.
+// AutoGen message types mapped to CGL:
+//   TextMessage       → conversational turn
+//   ToolCallMessage   → tool dispatch (also triggers ToolCallIntercept)
+//   ToolCallResultMessage → tool outcome
+//   HandoffMessage    → agent-to-agent scope transfer (high lateral risk)
+//   StopMessage       → termination signal
+//   MultiModalMessage → includes image/file — additional scope check
+
+message MessageInterceptRequest {
+  string sender_entity_id    = 1;  // Registered CAAS entity_id for sender
+  string receiver_entity_id  = 2;  // Registered CAAS entity_id for receiver
+  string task_id             = 3;
+  int32  round_number        = 4;  // AutoGen conversation round
+  AutoGenMessageType message_type = 5;
+  string message_content     = 6;
+  string message_json        = 7;  // Full message serialised
+  InterceptPhase phase       = 8;
+  bool   cross_agent_boundary= 9;  // True if different agent types
+  bool   cross_task_boundary = 10; // True if HandoffMessage
+  string session_id          = 11;
+  string runtime_version     = 12; // AutoGen version string
+}
+
+enum AutoGenMessageType {
+  AUTOGEN_MESSAGE_TYPE_UNSPECIFIED        = 0;
+  AUTOGEN_MESSAGE_TYPE_TEXT               = 1;
+  AUTOGEN_MESSAGE_TYPE_TOOL_CALL          = 2;
+  AUTOGEN_MESSAGE_TYPE_TOOL_CALL_RESULT   = 3;
+  AUTOGEN_MESSAGE_TYPE_HANDOFF            = 4;  // Highest lateral risk
+  AUTOGEN_MESSAGE_TYPE_STOP               = 5;
+  AUTOGEN_MESSAGE_TYPE_MULTIMODAL         = 6;
+  AUTOGEN_MESSAGE_TYPE_SYSTEM             = 7;
+}
+
+enum InterceptPhase {
+  INTERCEPT_PHASE_UNSPECIFIED = 0;
+  INTERCEPT_PHASE_PRE         = 1;
+  INTERCEPT_PHASE_POST        = 2;
+}
+
+message MessageInterceptResponse {
+  MessageVerdict  verdict         = 1;
+  string          reason          = 2;
+  int32           drift_score     = 3;
+  repeated AutoGenDriftSignal signals = 4;
+  string          review_token    = 5;
+  AutoGenRemediation remediation  = 6;
+  // For HandoffMessage: require federation-service relay token
+  bool            relay_required  = 7;
+  string          relay_token     = 8;
+  float           lateral_risk_score = 9;  // 0.0-1.0
+}
+
+enum MessageVerdict {
+  MESSAGE_VERDICT_UNSPECIFIED  = 0;
+  MESSAGE_VERDICT_ALLOW        = 1;
+  MESSAGE_VERDICT_WARN         = 2;
+  MESSAGE_VERDICT_STRONG_WARN  = 3;
+  MESSAGE_VERDICT_BLOCK        = 4;
+}
+
+enum AutoGenRemediation {
+  AUTOGEN_REMEDIATION_UNSPECIFIED      = 0;
+  AUTOGEN_REMEDIATION_NONE             = 1;
+  AUTOGEN_REMEDIATION_INJECT_SYSTEM    = 2;  // Inject constraint as system message
+  AUTOGEN_REMEDIATION_RESET_STATE      = 3;  // Trigger state boundary
+  AUTOGEN_REMEDIATION_ESCALATE_HUMAN   = 4;
+  AUTOGEN_REMEDIATION_TERMINATE        = 5;  // Signal termination condition
+}
+
+message AutoGenDriftSignal {
+  AutoGenSignalType type   = 1;
+  float             weight = 2;
+  string            detail = 3;
+}
+
+enum AutoGenSignalType {
+  AUTOGEN_SIGNAL_UNSPECIFIED           = 0;
+  AUTOGEN_SIGNAL_GOAL_DEVIATION        = 1;
+  AUTOGEN_SIGNAL_CONSTRAINT_EROSION    = 2;
+  AUTOGEN_SIGNAL_LATERAL_MOVEMENT      = 3;  // HandoffMessage outside declared scope
+  AUTOGEN_SIGNAL_AUTHORITY_CLAIM       = 4;
+  AUTOGEN_SIGNAL_ROUND_ANOMALY         = 5;  // Excessive rounds vs expected plan
+  AUTOGEN_SIGNAL_MEMORY_BLEED          = 6;
+  AUTOGEN_SIGNAL_SYCOPHANCY            = 7;
+  AUTOGEN_SIGNAL_TOOL_HALLUCINATION    = 8;
+  AUTOGEN_SIGNAL_HANDOFF_SCOPE_BREACH  = 9;  // Handoff recipient outside permitted agents
+}
+
+// ── ToolCallIntercept ─────────────────────────────────────────────────────
+// Supplements MessageIntercept with tool-specific signals.
+// Closest AutoGen equivalent to SK's IFunctionInvocationFilter.
+
+message ToolCallInterceptRequest {
+  string sender_entity_id  = 1;
+  string task_id           = 2;
+  int32  round_number      = 3;
+  string tool_name         = 4;
+  string tool_args_json    = 5;
+  string resource          = 6;  // Zanzibar format if known
+  InterceptPhase phase     = 7;
+  // POST phase
+  string tool_result_json  = 8;
+  bool   tool_succeeded    = 9;
+  int64  duration_ms       = 10;
+  string session_id        = 11;
+}
+
+message ToolCallInterceptResponse {
+  MessageVerdict    verdict        = 1;
+  string            reason         = 2;
+  int32             drift_score    = 3;
+  string            review_token   = 4;
+  AutoGenRemediation remediation   = 5;
+}
+
+// ── CompletionHook ────────────────────────────────────────────────────────
+// Called after every LLM completion.
+// AutoGen provides ChatCompletionContext — full structured history.
+// No scraping needed. Feeds cot-auditor directly.
+
+message CompletionHookRequest {
+  string agent_entity_id   = 1;
+  string task_id           = 2;
+  int32  round_number      = 3;
+  // Full message history from ChatCompletionContext
+  repeated AutoGenMessage message_history = 4;
+  // The completion that was just produced
+  string completion_content= 5;
+  string completion_role   = 6;  // "assistant"
+  // Usage stats
+  int32  prompt_tokens     = 7;
+  int32  completion_tokens = 8;
+  string model             = 9;
+  string session_id        = 10;
+}
+
+message AutoGenMessage {
+  string source    = 1;  // Agent name / actor ID
+  string content   = 2;
+  string type      = 3;  // AutoGen message type name
+  google.protobuf.Struct metadata = 4;
+}
+
+message CompletionHookResponse {
+  float  anomaly_score          = 1;
+  int32  updated_drift_score    = 2;
+  bool   inject_system_message  = 3;
+  string system_message_fragment= 4;
+  repeated string anomaly_tags  = 5;
+}
+
+// ── ShouldTerminate ───────────────────────────────────────────────────────
+// AutoGen pluggable termination condition backed by CGL.
+// Registered as a custom TerminationCondition in AutoGen.
+// AutoGen calls this after each message round.
+
+message ShouldTerminateRequest {
+  string agent_entity_id  = 1;
+  string task_id          = 2;
+  int32  round_number     = 3;
+  int32  message_count    = 4;
+  // Last message in the conversation
+  string last_message_type    = 5;
+  string last_message_content = 6;
+  string session_id           = 7;
+}
+
+message ShouldTerminateResponse {
+  bool   terminate         = 1;
+  string reason            = 2;
+  // Termination cause
+  TerminationCause cause   = 3;
+  int32  drift_score       = 4;
+}
+
+enum TerminationCause {
+  TERMINATION_CAUSE_UNSPECIFIED     = 0;
+  TERMINATION_CAUSE_DRIFT_BLOCK     = 1;  // Score >= BLOCK threshold
+  TERMINATION_CAUSE_HUMAN_REVIEW    = 2;  // STRONG_WARN pending M-of-N
+  TERMINATION_CAUSE_OPERATOR        = 3;  // Manual operator override
+  TERMINATION_CAUSE_SCOPE_EXHAUSTED = 4;  // All permitted tools/resources used
+  TERMINATION_CAUSE_MAX_ROUNDS      = 5;  // Exceeded max_rounds for task
+}
+
+// ── Task Lifecycle ────────────────────────────────────────────────────────
+
+message AutoGenRegisterTaskRequest {
+  string agent_entity_id          = 1;
+  string session_id               = 2;
+  // AutoGen team / group name
+  string team_name                = 3;
+  // All participant agent actor IDs
+  repeated string participant_entity_ids = 4;
+  string declared_goal            = 5;
+  repeated string permitted_tools = 6;
+  repeated string permitted_resources = 7;
+  repeated string permitted_handoff_targets = 8;  // Agents this agent may hand off to
+  int32  max_rounds               = 9;
+  int32  max_turns                = 10;
+  string parent_task_id           = 11;
+  string runtime_version          = 12;
+  google.protobuf.Struct team_config = 13;
+}
+
+message AutoGenRegisterTaskResponse {
+  string task_id                        = 1;
+  string intent_hash                    = 2;
+  string initial_system_message         = 3;  // Prepend to first system prompt
+  string termination_condition_id       = 4;  // Register with AutoGen runtime
+}
+
+message AutoGenCloseTaskRequest {
+  string task_id    = 1;
+  string session_id = 2;
+  AutoGenCloseReason reason = 3;
+  string summary    = 4;
+  int32  total_rounds = 5;
+}
+
+enum AutoGenCloseReason {
+  AUTOGEN_CLOSE_REASON_UNSPECIFIED    = 0;
+  AUTOGEN_CLOSE_REASON_COMPLETED      = 1;
+  AUTOGEN_CLOSE_REASON_MAX_ROUNDS     = 2;
+  AUTOGEN_CLOSE_REASON_DRIFT_BLOCK    = 3;
+  AUTOGEN_CLOSE_REASON_USER_ABORT     = 4;
+  AUTOGEN_CLOSE_REASON_ERROR          = 5;
+}
+
+message AutoGenCloseTaskResponse {
+  bool   closed               = 1;
+  int32  final_drift_score    = 2;
+  int32  total_rounds         = 3;
+  int32  blocked_messages     = 4;
+  int32  blocked_tool_calls   = 5;
+  int32  handoffs_intercepted = 6;
+  int32  injections_sent      = 7;
+  int32  state_boundaries     = 8;
+  int32  keys_purged          = 9;
+}
+
+// ── State Boundary ────────────────────────────────────────────────────────
+// AutoGen v0.4 provides save_state / load_state per agent actor.
+// memory-isolator hooks into these to enforce task boundaries.
+// Full state snapshot — no key registry workaround needed.
+
+message StateSaveRequest {
+  string agent_entity_id  = 1;
+  string task_id          = 2;
+  string session_id       = 3;
+  // Serialised agent state from AutoGen save_state()
+  string state_json       = 4;
+  string state_hash       = 5;  // SHA-256 for integrity
+  bool   task_ending      = 6;  // True if this is a final state save
+}
+
+message StateSaveResponse {
+  bool   proceed          = 1;   // False = block state save (rare edge case)
+  bool   boundary_created = 2;
+  string boundary_id      = 3;
+  // Keys to redact from state before saving (PII / cross-task bleed)
+  repeated string redact_keys = 4;
+}
+
+message StateLoadRequest {
+  string agent_entity_id  = 1;
+  string task_id          = 2;
+  string session_id       = 3;
+  // State being loaded into agent
+  string state_json       = 4;
+  string state_hash       = 5;
+  // Task that originally produced this state
+  string origin_task_id   = 6;
+}
+
+message StateLoadResponse {
+  bool   proceed            = 1;   // False = block state load
+  bool   bleed_detected     = 2;
+  string bleed_detail       = 3;
+  // Sanitised state with bleed keys removed
+  string sanitised_state_json = 4;
+  repeated string removed_keys = 5;
+}
+
+// ── Actor Registration ────────────────────────────────────────────────────
+
+message RegisterActorRequest {
+  // AutoGen AgentId fields
+  string autogen_agent_id   = 1;  // e.g. "assistant_agent"
+  string autogen_agent_type = 2;  // e.g. "AssistantAgent", "UserProxyAgent"
+  string task_id            = 3;
+  // CAAS entity type to register as
+  AutoGenEntityType entity_type = 4;
+  // Initial trust score seed (0-1000); 0 = use default
+  int32  initial_trust_score = 5;
+  google.protobuf.Struct agent_config = 6;
+}
+
+enum AutoGenEntityType {
+  AUTOGEN_ENTITY_TYPE_UNSPECIFIED      = 0;
+  AUTOGEN_ENTITY_TYPE_AI_AGENT         = 1;  // AssistantAgent, CodeAgent, etc.
+  AUTOGEN_ENTITY_TYPE_AUTONOMOUS_SYSTEM= 2;  // Multi-agent team / GroupChat
+  AUTOGEN_ENTITY_TYPE_SERVICE_API      = 3;  // ToolAgent wrapping external API
+}
+
+message RegisterActorResponse {
+  string entity_id    = 1;  // CAAS entity_id — use in all subsequent calls
+  string trust_token  = 2;  // Short-lived trust attestation token
+}
+
+message DeregisterActorRequest {
+  string entity_id = 1;
+  string task_id   = 2;
+}
+
+message DeregisterActorResponse {
+  bool deregistered = 1;
+}
+
+// ── Semantic Guardrail ────────────────────────────────────────────────────
+
+message AutoGenGuardrailRequest {
+  string agent_entity_id    = 1;
+  string task_id            = 2;
+  string content            = 3;
+  AutoGenGuardrailContentType content_type = 4;
+  int32  round_number       = 5;
+}
+
+enum AutoGenGuardrailContentType {
+  AUTOGEN_GUARDRAIL_CONTENT_TYPE_UNSPECIFIED   = 0;
+  AUTOGEN_GUARDRAIL_CONTENT_TYPE_USER_MESSAGE  = 1;
+  AUTOGEN_GUARDRAIL_CONTENT_TYPE_AGENT_MESSAGE = 2;
+  AUTOGEN_GUARDRAIL_CONTENT_TYPE_TOOL_INPUT    = 3;
+  AUTOGEN_GUARDRAIL_CONTENT_TYPE_TOOL_OUTPUT   = 4;
+  AUTOGEN_GUARDRAIL_CONTENT_TYPE_HANDOFF       = 5;
+}
+
+message AutoGenGuardrailResponse {
+  AutoGenGuardrailVerdict verdict             = 1;
+  float                   risk_score          = 2;
+  repeated string         triggered_policies  = 3;
+  string                  system_message_fragment = 4;
+  string                  reason              = 5;
+}
+
+enum AutoGenGuardrailVerdict {
+  AUTOGEN_GUARDRAIL_VERDICT_UNSPECIFIED = 0;
+  AUTOGEN_GUARDRAIL_VERDICT_PASS        = 1;
+  AUTOGEN_GUARDRAIL_VERDICT_AUGMENT     = 2;
+  AUTOGEN_GUARDRAIL_VERDICT_BLOCK       = 3;
+}
+
+// ── Health ────────────────────────────────────────────────────────────────
+
+message AutoGenHealthRequest {}
+
+message AutoGenHealthResponse {
+  bool                     healthy     = 1;
+  repeated AutoGenServiceHealth services = 2;
+  google.protobuf.Timestamp checked_at  = 3;
+}
+
+message AutoGenServiceHealth {
+  string service    = 1;
+  bool   healthy    = 2;
+  int64  latency_ms = 3;
+}

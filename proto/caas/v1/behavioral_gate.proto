@@ -1,0 +1,180 @@
+syntax = "proto3";
+
+package caas.v1;
+
+option go_package = "github.com/OpenAGX/caas/gen/go/caas/v1;caasv1";
+
+import "google/protobuf/timestamp.proto";
+
+// BehavioralGateService — pre-action intercept layer.
+// Sits between the agent runtime and authz-engine.
+// Every agent action MUST pass through Check before being dispatched.
+service BehavioralGateService {
+  // Check evaluates a proposed action against current drift state.
+  // Returns ALLOW, WARN, STRONG_WARN, or BLOCK with a reason.
+  rpc Check(BehavioralCheckRequest) returns (BehavioralCheckResponse);
+
+  // RecordOutcome records the final outcome of an action (for feedback loop).
+  rpc RecordOutcome(ActionOutcomeRequest) returns (ActionOutcomeResponse);
+
+  // GetDriftProfile returns the current drift profile for an agent entity.
+  rpc GetDriftProfile(DriftProfileRequest) returns (DriftProfileResponse);
+
+  // StreamDriftEvents streams real-time drift events for an agent.
+  rpc StreamDriftEvents(DriftStreamRequest) returns (stream DriftEvent);
+}
+
+// --- Check ---
+
+message BehavioralCheckRequest {
+  // The agent entity ID (maps to entity-service entity type AI_AGENT or AUTONOMOUS_SYSTEM).
+  string agent_entity_id = 1;
+
+  // The task ID this action belongs to (from intent-registry).
+  string task_id = 2;
+
+  // The action being proposed.
+  ProposedAction action = 3;
+
+  // Current turn number within the task context.
+  int32 turn_number = 4;
+
+  // Structured chain-of-thought excerpt (optional — enriches scoring).
+  string cot_excerpt = 5;
+
+  // Zookie token for consistency with authz-engine.
+  string consistency_token = 6;
+}
+
+message ProposedAction {
+  // Resource being acted upon (Zanzibar format: resource_type:resource_id).
+  string resource = 1;
+
+  // Relation/operation being requested (e.g. "write", "delete", "call").
+  string relation = 2;
+
+  // Structured parameters of the action (JSON-encoded).
+  string parameters_json = 3;
+
+  // Tool or API being invoked (e.g. "file_write", "http_post", "sql_exec").
+  string tool_name = 4;
+}
+
+message BehavioralCheckResponse {
+  // The verdict.
+  Verdict verdict = 1;
+
+  // Human-readable reason (for logging and M-of-N reviewers).
+  string reason = 2;
+
+  // Current drift score at time of check (0–1000, mirrors trust-engine scale).
+  int32 drift_score = 3;
+
+  // Which drift signals fired.
+  repeated DriftSignal signals = 4;
+
+  // If STRONG_WARN or BLOCK: review token to pass to decision-service.
+  string review_token = 5;
+
+  // Recommended remediation action.
+  Remediation recommended_remediation = 6;
+
+  // Timestamp of this check.
+  google.protobuf.Timestamp checked_at = 7;
+}
+
+enum Verdict {
+  VERDICT_UNSPECIFIED = 0;
+  VERDICT_ALLOW       = 1;
+  VERDICT_WARN        = 2;
+  VERDICT_STRONG_WARN = 3; // Route to M-of-N decision-service
+  VERDICT_BLOCK       = 4; // Hard stop; suspend entity lifecycle
+}
+
+enum Remediation {
+  REMEDIATION_UNSPECIFIED        = 0;
+  REMEDIATION_NONE               = 1;
+  REMEDIATION_INJECT_CONSTRAINTS = 2; // Trigger constraint-injector
+  REMEDIATION_RESET_MEMORY       = 3; // Trigger memory-isolator
+  REMEDIATION_HUMAN_REVIEW       = 4; // Escalate to decision-service
+  REMEDIATION_SUSPEND_AGENT      = 5; // Set entity lifecycle to SUSPENDED
+}
+
+message DriftSignal {
+  DriftSignalType type    = 1;
+  float           weight  = 2; // Contribution to drift score (0.0–1.0)
+  string          detail  = 3;
+}
+
+enum DriftSignalType {
+  DRIFT_SIGNAL_UNSPECIFIED       = 0;
+  DRIFT_SIGNAL_GOAL_DEVIATION    = 1; // Action inconsistent with declared intent
+  DRIFT_SIGNAL_COT_ANOMALY       = 2; // Reasoning diverges from prior turns
+  DRIFT_SIGNAL_CONSTRAINT_ERODED = 3; // Previously held constraint no longer present
+  DRIFT_SIGNAL_SCOPE_EXPANSION   = 4; // Resource outside original task scope
+  DRIFT_SIGNAL_VELOCITY_SPIKE    = 5; // Abnormal action frequency (from fraud-pipeline)
+  DRIFT_SIGNAL_MEMORY_BLEED      = 6; // Cross-task context contamination
+  DRIFT_SIGNAL_SYCOPHANCY        = 7; // Constraint retracted under user pressure
+}
+
+// --- RecordOutcome ---
+
+message ActionOutcomeRequest {
+  string agent_entity_id = 1;
+  string task_id         = 2;
+  string action_id       = 3; // Matches check response correlation ID
+  OutcomeType outcome    = 4;
+  string notes           = 5;
+}
+
+enum OutcomeType {
+  OUTCOME_UNSPECIFIED = 0;
+  OUTCOME_COMPLETED   = 1;
+  OUTCOME_FAILED      = 2;
+  OUTCOME_REVERSED    = 3;
+  OUTCOME_ESCALATED   = 4;
+}
+
+message ActionOutcomeResponse {
+  bool   recorded   = 1;
+  string outcome_id = 2;
+}
+
+// --- GetDriftProfile ---
+
+message DriftProfileRequest {
+  string agent_entity_id = 1;
+  string task_id         = 2; // Optional: scope to one task
+}
+
+message DriftProfileResponse {
+  string                  agent_entity_id  = 1;
+  int32                   current_score    = 2;
+  repeated DriftSignal    active_signals   = 3;
+  int32                   turn_count       = 4;
+  google.protobuf.Timestamp last_evaluated = 5;
+  repeated DriftThreshold thresholds       = 6;
+}
+
+message DriftThreshold {
+  Verdict verdict   = 1;
+  int32   min_score = 2;
+  int32   max_score = 3;
+}
+
+// --- StreamDriftEvents ---
+
+message DriftStreamRequest {
+  string agent_entity_id = 1;
+  string task_id         = 2;
+}
+
+message DriftEvent {
+  string                    agent_entity_id = 1;
+  string                    task_id         = 2;
+  DriftSignalType           signal_type     = 3;
+  Verdict                   verdict         = 4;
+  int32                     drift_score     = 5;
+  string                    detail          = 6;
+  google.protobuf.Timestamp occurred_at     = 7;
+}

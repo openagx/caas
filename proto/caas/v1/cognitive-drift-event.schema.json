@@ -1,0 +1,411 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/OpenAGX/caas/schemas/cognitive-drift-event/v2.json",
+  "title": "CognitiveDriftEvent",
+  "description": "Schema v2 for cognitive-drift-events Redpanda topic. All CGL services, SK adapter, AK adapter, and planner-iteration service publish here.",
+  "type": "object",
+  "required": [
+    "event_id",
+    "schema_version",
+    "occurred_at",
+    "agent_entity_id",
+    "task_id",
+    "event_type",
+    "source_service",
+    "drift_score",
+    "verdict"
+  ],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "schema_version": {
+      "type": "string",
+      "const": "2.0.0"
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "agent_entity_id": {
+      "type": "string"
+    },
+    "task_id": {
+      "type": "string"
+    },
+    "turn_number": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "event_type": {
+      "type": "string",
+      "enum": [
+        "DRIFT_SCORE_UPDATED",
+        "GOAL_DEVIATION_DETECTED",
+        "COT_ANOMALY_DETECTED",
+        "CONSTRAINT_ERODED",
+        "SCOPE_EXPANSION_DETECTED",
+        "MEMORY_BLEED_DETECTED",
+        "SYCOPHANCY_DETECTED",
+        "BOUNDARY_ENFORCED",
+        "CONSTRAINT_INJECTED",
+        "AGENT_SUSPENDED",
+        "REVIEW_ESCALATED",
+        "PLANNER_ITERATION_OBSERVED",
+        "PLANNER_TERMINATED",
+        "PLANNER_LOOP_ANOMALY",
+        "FUNCTION_HALLUCINATION_DETECTED",
+        "REASONING_REVERSAL_DETECTED",
+        "SK_FILTER_BLOCK",
+        "SK_SEMANTIC_GUARDRAIL_AUGMENT",
+        "AK_PRETOOL_BLOCK",
+        "AK_A2A_BLOCK",
+        "AK_SYCOPHANCY_YIELD",
+        "AUTOGEN_MESSAGE_BLOCK",
+        "AUTOGEN_HANDOFF_BLOCK",
+        "AUTOGEN_TOOL_CALL_BLOCK",
+        "AUTOGEN_STATE_BLEED_DETECTED",
+        "AUTOGEN_TERMINATION_FIRED",
+        "AUTOGEN_ROUND_ANOMALY"
+      ]
+    },
+    "source_service": {
+      "type": "string",
+      "enum": [
+        "behavioral-gate",
+        "intent-registry",
+        "cot-auditor",
+        "constraint-injector",
+        "drift-scorer",
+        "memory-isolator",
+        "sycophancy-guard",
+        "sk-reinforcement",
+        "ak-reinforcement",
+        "planner-iteration",
+        "autogen-reinforcement"
+      ]
+    },
+    "drift_score": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000
+    },
+    "verdict": {
+      "type": "string",
+      "enum": [
+        "ALLOW",
+        "WARN",
+        "STRONG_WARN",
+        "BLOCK"
+      ]
+    },
+    "signals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "type",
+          "weight"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "GOAL_DEVIATION",
+              "COT_ANOMALY",
+              "CONSTRAINT_ERODED",
+              "SCOPE_EXPANSION",
+              "VELOCITY_SPIKE",
+              "MEMORY_BLEED",
+              "SYCOPHANCY",
+              "LOOP_ANOMALY",
+              "FUNCTION_HALLUCINATION",
+              "REASONING_REVERSAL",
+              "SCOPE_CREEP",
+              "AUTHORITY_CLAIM",
+              "LATERAL_MOVEMENT",
+              "HANDOFF_SCOPE_BREACH",
+              "TOOL_HALLUCINATION",
+              "ROUND_ANOMALY"
+            ]
+          },
+          "weight": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0
+          },
+          "detail": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "proposed_action": {
+      "type": "object",
+      "description": "Present on BLOCK/WARN events",
+      "properties": {
+        "resource": {
+          "type": "string"
+        },
+        "relation": {
+          "type": "string"
+        },
+        "tool_name": {
+          "type": "string"
+        },
+        "plugin_name": {
+          "type": "string"
+        },
+        "parameters_json": {
+          "type": "string"
+        }
+      }
+    },
+    "planner_iteration": {
+      "type": "object",
+      "description": "Present on PLANNER_ITERATION_OBSERVED events. Captures IAutoFunctionInvocationFilter state \u2014 reasoning visibility before tool selection.",
+      "properties": {
+        "iteration_number": {
+          "type": "integer"
+        },
+        "requested_function": {
+          "type": "string"
+        },
+        "requested_plugin": {
+          "type": "string"
+        },
+        "requested_args_json": {
+          "type": "string"
+        },
+        "function_count": {
+          "type": "integer"
+        },
+        "reasoning_anomaly_score": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "directive": {
+          "type": "string",
+          "enum": [
+            "CONTINUE",
+            "INJECT",
+            "REVIEW",
+            "TERMINATE"
+          ]
+        },
+        "runtime": {
+          "type": "string",
+          "enum": [
+            "sk_dotnet",
+            "sk_python",
+            "sk_java",
+            "ak_python",
+            "langgraph",
+            "crewai",
+            "google_adk",
+            "other",
+            "autogen_python"
+          ]
+        },
+        "is_final_iteration": {
+          "type": "boolean"
+        }
+      }
+    },
+    "remediation": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "INJECT_CONSTRAINTS",
+        "RESET_MEMORY",
+        "HUMAN_REVIEW",
+        "SUSPEND_AGENT"
+      ]
+    },
+    "review_token": {
+      "type": "string"
+    },
+    "iteration_event_id": {
+      "type": "string"
+    },
+    "runtime": {
+      "type": "string",
+      "enum": [
+        "sk_dotnet",
+        "sk_python",
+        "sk_java",
+        "ak_python",
+        "langgraph",
+        "crewai",
+        "google_adk",
+        "native",
+        "other",
+        "autogen_python"
+      ]
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "autogen_message": {
+      "type": "object",
+      "description": "Present on AUTOGEN_* events",
+      "properties": {
+        "sender_entity_id": {
+          "type": "string"
+        },
+        "receiver_entity_id": {
+          "type": "string"
+        },
+        "message_type": {
+          "type": "string"
+        },
+        "round_number": {
+          "type": "integer"
+        },
+        "lateral_risk_score": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "handoff_target": {
+          "type": "string"
+        },
+        "is_cross_task": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  "additionalProperties": false,
+  "x-topic-config": {
+    "topic_name": "cognitive-drift-events",
+    "schema_version": "2.0.0",
+    "partitions": 12,
+    "replication_factor": 3,
+    "retention_ms": 2592000000,
+    "cleanup_policy": "delete",
+    "compression_type": "lz4",
+    "partition_key": "agent_entity_id",
+    "producers": [
+      {
+        "service": "behavioral-gate",
+        "port": 50059
+      },
+      {
+        "service": "intent-registry",
+        "port": 50060
+      },
+      {
+        "service": "cot-auditor",
+        "port": 50061
+      },
+      {
+        "service": "constraint-injector",
+        "port": 50062
+      },
+      {
+        "service": "drift-scorer",
+        "port": 50063
+      },
+      {
+        "service": "memory-isolator",
+        "port": 50064
+      },
+      {
+        "service": "sycophancy-guard",
+        "port": 50065
+      },
+      {
+        "service": "ak-reinforcement",
+        "port": 50066
+      },
+      {
+        "service": "sk-reinforcement",
+        "port": 50067
+      },
+      {
+        "service": "planner-iteration",
+        "port": 50068
+      },
+      {
+        "service": "autogen-reinforcement",
+        "port": 50069
+      }
+    ],
+    "consumer_groups": [
+      {
+        "name": "behavioral-gate-consumer",
+        "service": "behavioral-gate",
+        "port": 50059,
+        "filter": [
+          "DRIFT_SCORE_UPDATED",
+          "GOAL_DEVIATION_DETECTED",
+          "SYCOPHANCY_DETECTED",
+          "PLANNER_ITERATION_OBSERVED",
+          "PLANNER_TERMINATED",
+          "FUNCTION_HALLUCINATION_DETECTED",
+          "AUTOGEN_MESSAGE_BLOCK",
+          "AUTOGEN_TERMINATION_FIRED"
+        ]
+      },
+      {
+        "name": "fraud-pipeline-consumer",
+        "service": "fraud-pipeline",
+        "port": 50054,
+        "filter": [
+          "*"
+        ]
+      },
+      {
+        "name": "decision-service-consumer",
+        "service": "decision-service",
+        "port": 50055,
+        "filter": [
+          "REVIEW_ESCALATED",
+          "AGENT_SUSPENDED",
+          "PLANNER_TERMINATED"
+        ]
+      },
+      {
+        "name": "planner-iteration-consumer",
+        "service": "planner-iteration",
+        "port": 50068,
+        "filter": [
+          "PLANNER_ITERATION_OBSERVED",
+          "PLANNER_TERMINATED",
+          "PLANNER_LOOP_ANOMALY",
+          "FUNCTION_HALLUCINATION_DETECTED",
+          "REASONING_REVERSAL_DETECTED"
+        ]
+      },
+      {
+        "name": "cot-auditor-consumer",
+        "service": "cot-auditor",
+        "port": 50061,
+        "filter": [
+          "PLANNER_ITERATION_OBSERVED",
+          "COT_ANOMALY_DETECTED",
+          "REASONING_REVERSAL_DETECTED"
+        ]
+      },
+      {
+        "name": "autogen-reinforcement-consumer",
+        "service": "autogen-reinforcement",
+        "port": 50069,
+        "filter": [
+          "AUTOGEN_MESSAGE_BLOCK",
+          "AUTOGEN_HANDOFF_BLOCK",
+          "AUTOGEN_TOOL_CALL_BLOCK",
+          "AUTOGEN_STATE_BLEED_DETECTED",
+          "AUTOGEN_TERMINATION_FIRED",
+          "DRIFT_SCORE_UPDATED"
+        ]
+      }
+    ]
+  }
+}

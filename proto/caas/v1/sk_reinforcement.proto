@@ -1,0 +1,473 @@
+syntax = "proto3";
+
+package caas.v1;
+
+option go_package = "github.com/OpenAGX/caas/gen/go/caas/v1;caasv1";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+
+// ============================================================
+// SKReinforcementService — port 50067
+//
+// Semantic Kernel (SK) reinforcement adapter for CAAS v2 CGL.
+//
+// SK advantages over AK that this adapter leverages:
+//   1. IFunctionInvocationFilter fires PRE and POST in a single
+//      method — no hook mismatch. Cleaner than AK.
+//   2. IAutoFunctionInvocationFilter fires on EACH ITERATION of
+//      the planner's auto-function selection loop — gives CGL
+//      visibility into reasoning BEFORE tool selection, not just
+//      before dispatch. No other runtime exposes this.
+//   3. IPromptRenderFilter fires before/after every prompt render
+//      — enables constraint injection at the correct moment.
+//   4. Native abort via context early-return — no exception needed.
+//
+// This adapter is ~40% simpler than AKReinforcementService because
+// SK already has what AK is missing (pre-tool hook).
+//
+// New framework concept introduced here:
+//   PlannerIterationEvent — captures the IAutoFunctionInvocationFilter
+//   signal as a first-class CGL event type. Published to
+//   cognitive-drift-events topic as PLANNER_ITERATION_OBSERVED.
+//   Consumed by cot-auditor and drift-scorer.
+// ============================================================
+
+service SKReinforcementService {
+
+  // ── Function invocation filter (pre + post in one call) ─────
+  // SK IFunctionInvocationFilter calls this.
+  // PRE phase: returns verdict before SK calls next().
+  // POST phase: records outcome after next() returns.
+  rpc FunctionInvocationFilter(FunctionInvocationFilterRequest)
+      returns (FunctionInvocationFilterResponse);
+
+  // ── Auto-function invocation filter (NEW CGL concept) ───────
+  // SK IAutoFunctionInvocationFilter calls this on EACH planner
+  // iteration — before the LLM decides which tool to call.
+  // This is the reasoning-visibility hook no other runtime has.
+  // Feeds cot-auditor and drift-scorer directly.
+  rpc AutoFunctionInvocationFilter(AutoFunctionInvocationFilterRequest)
+      returns (AutoFunctionInvocationFilterResponse);
+
+  // ── Prompt render filter ─────────────────────────────────────
+  // SK IPromptRenderFilter calls this before prompt assembly.
+  // Returns constraint fragment to inject + whether to proceed.
+  rpc PromptRenderFilter(PromptRenderFilterRequest)
+      returns (PromptRenderFilterResponse);
+
+  // ── Task lifecycle ───────────────────────────────────────────
+  rpc RegisterTask(SKRegisterTaskRequest)  returns (SKRegisterTaskResponse);
+  rpc CloseTask(SKCloseTaskRequest)        returns (SKCloseTaskResponse);
+
+  // ── Memory isolation ─────────────────────────────────────────
+  // SK VectorStore has delete-by-key but no task-scoped list.
+  // Adapter owns the key registry + scoped purge.
+  rpc RegisterMemoryKey(RegisterMemoryKeyRequest)   returns (RegisterMemoryKeyResponse);
+  rpc PurgeTaskMemory(SKPurgeTaskMemoryRequest)     returns (SKPurgeTaskMemoryResponse);
+
+  // ── A2A / AgentGroupChat interception ────────────────────────
+  // SK AgentGroupChat has no pre-message hook between agents.
+  // Adapter wraps AgentChannel to provide interception.
+  rpc CheckAgentMessage(SKAgentMessageCheckRequest) returns (SKAgentMessageCheckResponse);
+
+  // ── Semantic guardrail (complements Azure AI Content Safety) ─
+  rpc SemanticGuardrailCheck(SKSemanticGuardrailRequest)
+      returns (SKSemanticGuardrailResponse);
+
+  // ── Health ───────────────────────────────────────────────────
+  rpc Health(SKHealthRequest) returns (SKHealthResponse);
+}
+
+// ── FunctionInvocationFilter ──────────────────────────────────────────────
+// Single RPC handles both pre and post phases.
+// Phase is determined by invocation_phase field.
+// SK calls this once before next() with PHASE_PRE.
+// SK calls this once after next() with PHASE_POST.
+
+message FunctionInvocationFilterRequest {
+  string agent_entity_id  = 1;
+  string task_id          = 2;
+  int32  turn_number      = 3;
+  int32  iteration_number = 4;  // Planner iteration index
+  InvocationPhase phase   = 5;
+
+  // Function being invoked
+  string function_name    = 6;
+  string plugin_name      = 7;
+  string arguments_json   = 8;  // KernelArguments serialised
+
+  // POST phase only
+  string result_json      = 9;  // FunctionResult serialised
+  bool   was_cancelled    = 10; // True if pre-phase returned BLOCK
+  int64  duration_ms      = 11;
+
+  string session_id       = 12;
+  SKRuntime runtime       = 13;
+}
+
+enum InvocationPhase {
+  INVOCATION_PHASE_UNSPECIFIED = 0;
+  INVOCATION_PHASE_PRE         = 1;
+  INVOCATION_PHASE_POST        = 2;
+}
+
+enum SKRuntime {
+  SK_RUNTIME_UNSPECIFIED  = 0;
+  SK_RUNTIME_DOTNET       = 1;
+  SK_RUNTIME_PYTHON       = 2;
+  SK_RUNTIME_JAVA         = 3;
+}
+
+message FunctionInvocationFilterResponse {
+  // PRE phase: verdict controls whether SK calls next().
+  // POST phase: verdict is informational only.
+  FunctionVerdict verdict         = 1;
+  string          reason          = 2;
+  int32           drift_score     = 3;
+  repeated string active_signals  = 4;
+  string          review_token    = 5;
+  SKRemediation   remediation     = 6;
+  // POST phase: updated drift score after outcome recorded
+  int32           updated_drift_score = 7;
+}
+
+enum FunctionVerdict {
+  FUNCTION_VERDICT_UNSPECIFIED  = 0;
+  FUNCTION_VERDICT_ALLOW        = 1;
+  FUNCTION_VERDICT_WARN         = 2;
+  FUNCTION_VERDICT_STRONG_WARN  = 3;
+  FUNCTION_VERDICT_BLOCK        = 4;
+}
+
+enum SKRemediation {
+  SK_REMEDIATION_UNSPECIFIED       = 0;
+  SK_REMEDIATION_NONE              = 1;
+  SK_REMEDIATION_INJECT_NEXT_TURN  = 2;
+  SK_REMEDIATION_RESET_MEMORY      = 3;
+  SK_REMEDIATION_ESCALATE_HUMAN    = 4;
+  SK_REMEDIATION_SUSPEND           = 5;
+}
+
+// ── AutoFunctionInvocationFilter ─────────────────────────────────────────
+// NEW CGL CONCEPT — first-class framework event.
+//
+// Fires on each iteration of SK's auto-function selection loop.
+// This gives CGL visibility into the reasoning layer BEFORE the
+// LLM selects a tool — not just before dispatch.
+//
+// Each call represents one planner "think step":
+//   - chat_history contains the full conversation including the
+//     LLM's latest reasoning turn
+//   - function_count is how many tools are available this iteration
+//   - requested_function is what the LLM chose (may be empty on
+//     first iteration before choice is made)
+//
+// CGL uses this to:
+//   1. Feed cot-auditor with reasoning before tool selection
+//   2. Detect goal substitution mid-plan
+//   3. Detect constraint erosion across planner iterations
+//   4. Emit PLANNER_ITERATION_OBSERVED to cognitive-drift-events
+
+message AutoFunctionInvocationFilterRequest {
+  string agent_entity_id   = 1;
+  string task_id           = 2;
+  int32  turn_number       = 3;
+  int32  iteration_number  = 4;  // 0-indexed planner iteration
+
+  // Full chat history at this iteration point.
+  // The last message is the LLM's current reasoning turn.
+  repeated ChatMessage chat_history = 5;
+
+  // The function the LLM selected this iteration (may be empty).
+  string requested_function  = 6;
+  string requested_plugin    = 7;
+  string requested_args_json = 8;
+
+  // Total available functions this iteration
+  int32  function_count      = 9;
+
+  // Is the planner terminating after this iteration?
+  bool   is_final_iteration  = 10;
+
+  string session_id          = 11;
+  SKRuntime runtime          = 12;
+}
+
+message ChatMessage {
+  string role    = 1;  // "system", "user", "assistant", "tool"
+  string content = 2;
+  string name    = 3;  // Tool name if role=tool
+}
+
+message AutoFunctionInvocationFilterResponse {
+  // Reasoning-level verdict.
+  // BLOCK here terminates the entire planner loop — use carefully.
+  // WARN flags for human review without stopping.
+  PlannerVerdict  verdict              = 1;
+  string          reason               = 2;
+
+  // Anomaly signals detected in this iteration's reasoning
+  repeated PlannerSignal signals       = 3;
+
+  // Updated drift score after this iteration
+  int32           drift_score          = 4;
+
+  // Whether constraint injection is needed before next iteration
+  bool            inject_before_next   = 5;
+  string          constraint_fragment  = 6;
+
+  // Whether to terminate the planner loop
+  bool            terminate_planner    = 7;
+
+  // Planner iteration event ID — for tracing
+  string          iteration_event_id   = 8;
+}
+
+enum PlannerVerdict {
+  PLANNER_VERDICT_UNSPECIFIED  = 0;
+  PLANNER_VERDICT_CONTINUE     = 1;  // Normal — proceed
+  PLANNER_VERDICT_WARN         = 2;  // Flag but continue
+  PLANNER_VERDICT_INJECT       = 3;  // Continue + inject constraints
+  PLANNER_VERDICT_REVIEW       = 4;  // Route to M-of-N before next iteration
+  PLANNER_VERDICT_TERMINATE    = 5;  // Stop planner loop
+}
+
+message PlannerSignal {
+  PlannerSignalType type   = 1;
+  float             weight = 2;
+  string            detail = 3;
+  int32             iteration_number = 4;
+}
+
+enum PlannerSignalType {
+  PLANNER_SIGNAL_UNSPECIFIED            = 0;
+  PLANNER_SIGNAL_GOAL_DEVIATION         = 1;  // Reasoning diverges from declared goal
+  PLANNER_SIGNAL_CONSTRAINT_EROSION     = 2;  // Constraint present in iter N absent in N+1
+  PLANNER_SIGNAL_SCOPE_CREEP            = 3;  // Function selection outside permitted scope
+  PLANNER_SIGNAL_AUTHORITY_CLAIM        = 4;  // LLM reasoning asserts unpermitted authority
+  PLANNER_SIGNAL_LOOP_ANOMALY           = 5;  // Iteration count exceeds expected plan length
+  PLANNER_SIGNAL_FUNCTION_HALLUCINATION = 6;  // LLM selects function not in available set
+  PLANNER_SIGNAL_REASONING_REVERSAL     = 7;  // Reasoning in iter N contradicts iter N-1
+}
+
+// ── PromptRenderFilter ────────────────────────────────────────────────────
+
+message PromptRenderFilterRequest {
+  string agent_entity_id    = 1;
+  string task_id            = 2;
+  int32  turn_number        = 3;
+  PromptRenderPhase phase   = 4;
+
+  // PRE phase: rendered prompt template before variable substitution
+  string prompt_template    = 5;
+  string prompt_hash        = 6;  // SHA-256 prefix for idempotency
+
+  // POST phase: final rendered prompt
+  string rendered_prompt    = 7;
+  string rendered_hash      = 8;
+
+  string session_id         = 9;
+}
+
+enum PromptRenderPhase {
+  PROMPT_RENDER_PHASE_UNSPECIFIED = 0;
+  PROMPT_RENDER_PHASE_PRE         = 1;
+  PROMPT_RENDER_PHASE_POST        = 2;
+}
+
+message PromptRenderFilterResponse {
+  bool   proceed                = 1;  // False = abort prompt render (rare)
+  bool   injection_required     = 2;
+  string constraint_fragment    = 3;  // Prepend to rendered prompt
+  InjectionPosition position    = 4;
+  string fragment_hash          = 5;
+}
+
+enum InjectionPosition {
+  INJECTION_POSITION_UNSPECIFIED = 0;
+  INJECTION_POSITION_PREPEND     = 1;
+  INJECTION_POSITION_APPEND      = 2;
+  INJECTION_POSITION_AFTER_SYSTEM= 3;
+}
+
+// ── Task Lifecycle ────────────────────────────────────────────────────────
+
+message SKRegisterTaskRequest {
+  string agent_entity_id          = 1;
+  string session_id               = 2;
+  string kernel_id                = 3;  // SK Kernel instance ID
+  string declared_goal            = 4;
+  repeated string permitted_plugins  = 5;  // SK plugin names
+  repeated string permitted_functions= 6;  // plugin.function format
+  repeated string permitted_resources= 7;
+  int32  max_turns                = 8;
+  int32  max_iterations           = 9;  // Max planner iterations
+  string parent_task_id           = 10;
+  SKRuntime runtime               = 11;
+  google.protobuf.Struct kernel_config = 12;
+}
+
+message SKRegisterTaskResponse {
+  string task_id                        = 1;
+  string intent_hash                    = 2;
+  string initial_constraint_fragment    = 3;
+  // Registered filter IDs — SK uses these for correlation
+  string function_filter_id             = 4;
+  string auto_function_filter_id        = 5;
+  string prompt_render_filter_id        = 6;
+}
+
+message SKCloseTaskRequest {
+  string task_id    = 1;
+  string session_id = 2;
+  string kernel_id  = 3;
+  SKTaskCloseReason reason  = 4;
+  string summary    = 5;
+}
+
+enum SKTaskCloseReason {
+  SK_TASK_CLOSE_REASON_UNSPECIFIED    = 0;
+  SK_TASK_CLOSE_REASON_COMPLETED      = 1;
+  SK_TASK_CLOSE_REASON_FAILED         = 2;
+  SK_TASK_CLOSE_REASON_PLANNER_HALT   = 3;
+  SK_TASK_CLOSE_REASON_DRIFT_BLOCK    = 4;
+  SK_TASK_CLOSE_REASON_USER_ABORT     = 5;
+}
+
+message SKCloseTaskResponse {
+  bool   closed                 = 1;
+  int32  final_drift_score      = 2;
+  int32  total_turns            = 3;
+  int32  total_iterations       = 4;
+  int32  blocked_functions      = 5;
+  int32  terminated_planners    = 6;
+  int32  injections_sent        = 7;
+}
+
+// ── Memory Isolation ──────────────────────────────────────────────────────
+
+message RegisterMemoryKeyRequest {
+  string task_id      = 1;
+  string session_id   = 2;
+  string kernel_id    = 3;
+  string collection   = 4;  // SK VectorStore collection name
+  string key          = 5;
+  SKMemoryStore store = 6;
+  KeySensitivity sensitivity = 7;
+}
+
+enum SKMemoryStore {
+  SK_MEMORY_STORE_UNSPECIFIED    = 0;
+  SK_MEMORY_STORE_IN_MEMORY      = 1;
+  SK_MEMORY_STORE_REDIS          = 2;
+  SK_MEMORY_STORE_AZURE_AI_SEARCH= 3;
+  SK_MEMORY_STORE_QDRANT         = 4;
+  SK_MEMORY_STORE_CHROMA         = 5;
+  SK_MEMORY_STORE_COSMOS_DB      = 6;
+}
+
+enum KeySensitivity {
+  KEY_SENSITIVITY_UNSPECIFIED = 0;
+  KEY_SENSITIVITY_NORMAL      = 1;
+  KEY_SENSITIVITY_HIGH        = 2;
+}
+
+message RegisterMemoryKeyResponse {
+  bool   registered     = 1;
+  bool   bleed_risk     = 2;
+  string origin_task_id = 3;
+}
+
+message SKPurgeTaskMemoryRequest {
+  string task_id    = 1;
+  string session_id = 2;
+  string kernel_id  = 3;
+  bool   dry_run    = 4;
+}
+
+message SKPurgeTaskMemoryResponse {
+  int32           keys_purged       = 1;
+  repeated string purged_keys       = 2;
+  int32           bleed_keys_found  = 3;
+  bool            dry_run           = 4;
+}
+
+// ── AgentGroupChat Interception ───────────────────────────────────────────
+
+message SKAgentMessageCheckRequest {
+  string sender_agent_entity_id   = 1;
+  string receiver_agent_entity_id = 2;
+  string sender_task_id           = 3;
+  string channel_name             = 4;  // SK AgentChannel name
+  string message_content          = 5;
+  string message_role             = 6;
+  bool   cross_sovereign          = 7;
+  string session_id               = 8;
+}
+
+message SKAgentMessageCheckResponse {
+  FunctionVerdict verdict           = 1;
+  string          reason            = 2;
+  string          relay_token       = 3;
+  float           lateral_risk_score= 4;
+}
+
+// ── Semantic Guardrail ────────────────────────────────────────────────────
+
+message SKSemanticGuardrailRequest {
+  string agent_entity_id    = 1;
+  string task_id            = 2;
+  string content            = 3;
+  SKGuardrailContentType content_type = 4;
+  // Azure AI Content Safety verdict passed through for calibration
+  AzureContentSafetyVerdict azure_verdict = 5;
+  float  azure_risk_score   = 6;
+}
+
+enum SKGuardrailContentType {
+  SK_GUARDRAIL_CONTENT_TYPE_UNSPECIFIED    = 0;
+  SK_GUARDRAIL_CONTENT_TYPE_USER_MESSAGE   = 1;
+  SK_GUARDRAIL_CONTENT_TYPE_AGENT_RESPONSE = 2;
+  SK_GUARDRAIL_CONTENT_TYPE_FUNCTION_INPUT = 3;
+  SK_GUARDRAIL_CONTENT_TYPE_FUNCTION_OUTPUT= 4;
+  SK_GUARDRAIL_CONTENT_TYPE_PROMPT_RENDER  = 5;
+}
+
+enum AzureContentSafetyVerdict {
+  AZURE_CS_VERDICT_UNSPECIFIED = 0;
+  AZURE_CS_VERDICT_SAFE        = 1;
+  AZURE_CS_VERDICT_FLAGGED     = 2;
+  AZURE_CS_VERDICT_BLOCKED     = 3;
+}
+
+message SKSemanticGuardrailResponse {
+  SKSemanticVerdict verdict               = 1;
+  float             risk_score            = 2;
+  repeated string   triggered_policies    = 3;
+  string            constraint_fragment   = 4;
+  string            reason                = 5;
+}
+
+enum SKSemanticVerdict {
+  SK_SEMANTIC_VERDICT_UNSPECIFIED = 0;
+  SK_SEMANTIC_VERDICT_PASS        = 1;
+  SK_SEMANTIC_VERDICT_AUGMENT     = 2;
+  SK_SEMANTIC_VERDICT_BLOCK       = 3;
+}
+
+// ── Health ────────────────────────────────────────────────────────────────
+
+message SKHealthRequest {}
+
+message SKHealthResponse {
+  bool                     healthy     = 1;
+  repeated SKServiceHealth services    = 2;
+  google.protobuf.Timestamp checked_at = 3;
+}
+
+message SKServiceHealth {
+  string service    = 1;
+  bool   healthy    = 2;
+  int64  latency_ms = 3;
+}

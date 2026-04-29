@@ -1,0 +1,364 @@
+# docker-compose.caas-v2.yml
+# CAAS v2 — Docker Compose additions only.
+# Merge this into the existing docker-compose.yml.
+# All services connect to shared-infra_default network.
+# Startup order: infra → CGL foundations → CGL scoring → enforcement → adapters
+
+version: "3.9"
+
+networks:
+  shared-infra_default:
+    external: true
+
+services:
+
+  # ── CGL Layer — Phase 1: Foundations ──────────────────────────────────────
+
+  intent-registry:
+    image: openagx/caas-intent-registry:latest
+    build:
+      context: .
+      dockerfile: services/intent-registry/Dockerfile
+    ports:
+      - "50060:50060"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - KAFKA_BROKERS=${KAFKA_BROKERS}
+      - COGNITIVE_DRIFT_TOPIC=cognitive-drift-events
+      - GRPC_PORT=50060
+    networks:
+      - shared-infra_default
+    depends_on:
+      - postgres
+      - redis
+      - redpanda
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:50060"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  memory-isolator:
+    image: openagx/caas-memory-isolator:latest
+    build:
+      context: .
+      dockerfile: services/memory-isolator/Dockerfile
+    ports:
+      - "50064:50064"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - KAFKA_BROKERS=${KAFKA_BROKERS}
+      - COGNITIVE_DRIFT_TOPIC=cognitive-drift-events
+      - GRPC_PORT=50064
+    networks:
+      - shared-infra_default
+    depends_on:
+      - postgres
+      - redis
+      - redpanda
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:50064"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ── CGL Layer — Phase 2: Observability ────────────────────────────────────
+
+  cot-auditor:
+    image: openagx/caas-cot-auditor:latest
+    build:
+      context: .
+      dockerfile: services/cot-auditor/Dockerfile
+    ports:
+      - "50061:50061"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - KAFKA_BROKERS=${KAFKA_BROKERS}
+      - COGNITIVE_DRIFT_TOPIC=cognitive-drift-events
+      - INTENT_REGISTRY_ENDPOINT=intent-registry:50060
+      - COT_ANOMALY_THRESHOLD=${CGL_COT_ANOMALY_THRESHOLD:-0.7}
+      - EMBEDDING_MODEL=${CGL_EMBEDDING_MODEL:-text-embedding-3-small}
+      - GRPC_PORT=50061
+    networks:
+      - shared-infra_default
+    depends_on:
+      - intent-registry
+      - redpanda
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:50061"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  sycophancy-guard:
+    image: openagx/caas-sycophancy-guard:latest
+    build:
+      context: .
+      dockerfile: services/sycophancy-guard/Dockerfile
+    ports:
+      - "50065:50065"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - KAFKA_BROKERS=${KAFKA_BROKERS}
+      - COGNITIVE_DRIFT_TOPIC=cognitive-drift-events
+      - INTENT_REGISTRY_ENDPOINT=intent-registry:50060
+      - DECISION_SERVICE_ENDPOINT=decision-service:50055
+      - SYCOPHANCY_CONFIDENCE_THRESHOLD=${CGL_SYCOPHANCY_THRESHOLD:-0.8}
+      - GRPC_PORT=50065
+    networks:
+      - shared-infra_default
+    depends_on:
+      - intent-registry
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:50065"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # NEW — Phase 2: Planner iteration service (PlannerIterationService)
+  planner-iteration:
+    image: openagx/caas-planner-iteration:latest
+    build:
+      context: .
+      dockerfile: services/planner-iteration/Dockerfile
+    ports:
+      - "50068:50068"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - KAFKA_BROKERS=${KAFKA_BROKERS}
+      - COGNITIVE_DRIFT_TOPIC=cognitive-drift-events
+      - COT_AUDITOR_ENDPOINT=cot-auditor:50061
+      - INTENT_REGISTRY_ENDPOINT=intent-registry:50060
+      - DRIFT_SCORER_ENDPOINT=drift-scorer:50063
+      - GRPC_PORT=50068
+    networks:
+      - shared-infra_default
+    depends_on:
+      - cot-auditor
+      - intent-registry
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:50068"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  constraint-injector:
+    image: openagx/caas-constraint-injector:latest
+    build:
+      context: .
+      dockerfile: services/constraint-injector/Dockerfile
+    ports:
+      - "50062:50062"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - AUTHZ_ENGINE_ENDPOINT=authz-engine:50051
+      - INTENT_REGISTRY_ENDPOINT=intent-registry:50060
+      - INJECTION_INTERVAL_TURNS=${CGL_INJECTION_INTERVAL_TURNS:-10}
+      - DRIFT_SCORE_THRESHOLD=${CGL_INJECTION_DRIFT_THRESHOLD:-500}
+      - GRPC_PORT=50062
+    networks:
+      - shared-infra_default
+    depends_on:
+      - intent-registry
+      - authz-engine
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:50062"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ── CGL Layer — Phase 3: Scoring ──────────────────────────────────────────
+
+  drift-scorer:
+    image: openagx/caas-drift-scorer:latest
+    build:
+      context: .
+      dockerfile: services/drift-scorer/Dockerfile
+    ports:
+      - "50063:50063"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - KAFKA_BROKERS=${KAFKA_BROKERS}
+      - COGNITIVE_DRIFT_TOPIC=cognitive-drift-events
+      - COT_AUDITOR_ENDPOINT=cot-auditor:50061
+      - INTENT_REGISTRY_ENDPOINT=intent-registry:50060
+      - SYCOPHANCY_GUARD_ENDPOINT=sycophancy-guard:50065
+      - PLANNER_ITERATION_ENDPOINT=planner-iteration:50068
+      - DRIFT_SCORE_WINDOW=${CGL_DRIFT_SCORE_WINDOW:-20}
+      - GRPC_PORT=50063
+    networks:
+      - shared-infra_default
+    depends_on:
+      - cot-auditor
+      - intent-registry
+      - sycophancy-guard
+      - planner-iteration
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:50063"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ── AuthZ Core — Phase 4: Enforcement ────────────────────────────────────
+
+  behavioral-gate:
+    image: openagx/caas-behavioral-gate:latest
+    build:
+      context: .
+      dockerfile: services/behavioral-gate/Dockerfile
+    ports:
+      - "50059:50059"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - KAFKA_BROKERS=${KAFKA_BROKERS}
+      - COGNITIVE_DRIFT_TOPIC=cognitive-drift-events
+      - AUTHZ_ENGINE_ENDPOINT=authz-engine:50051
+      - ENTITY_SERVICE_ENDPOINT=entity-service:50052
+      - DRIFT_SCORER_ENDPOINT=drift-scorer:50063
+      - DECISION_SERVICE_ENDPOINT=decision-service:50055
+      - WARN_THRESHOLD=${BEHAVIORAL_GATE_WARN_THRESHOLD:-400}
+      - STRONG_WARN_THRESHOLD=${BEHAVIORAL_GATE_STRONG_WARN_THRESHOLD:-600}
+      - BLOCK_THRESHOLD=${BEHAVIORAL_GATE_BLOCK_THRESHOLD:-800}
+      - GRPC_PORT=50059
+    networks:
+      - shared-infra_default
+    depends_on:
+      - drift-scorer
+      - authz-engine
+      - entity-service
+      - decision-service
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:50059"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # ── Adapter Layer — Phase 5: Runtime Integration ──────────────────────────
+
+  ak-reinforcement:
+    image: openagx/caas-ak-reinforcement:latest
+    build:
+      context: .
+      dockerfile: services/ak-reinforcement/Dockerfile
+    ports:
+      - "50066:50066"
+    environment:
+      - BEHAVIORAL_GATE_ENDPOINT=behavioral-gate:50059
+      - INTENT_REGISTRY_ENDPOINT=intent-registry:50060
+      - COT_AUDITOR_ENDPOINT=cot-auditor:50061
+      - CONSTRAINT_INJECTOR_ENDPOINT=constraint-injector:50062
+      - DRIFT_SCORER_ENDPOINT=drift-scorer:50063
+      - MEMORY_ISOLATOR_ENDPOINT=memory-isolator:50064
+      - SYCOPHANCY_GUARD_ENDPOINT=sycophancy-guard:50065
+      - PLANNER_ITERATION_ENDPOINT=planner-iteration:50068
+      - KAFKA_BROKERS=${KAFKA_BROKERS}
+      - COGNITIVE_DRIFT_TOPIC=cognitive-drift-events
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - GRPC_PORT=50066
+    networks:
+      - shared-infra_default
+    depends_on:
+      - behavioral-gate
+      - drift-scorer
+      - memory-isolator
+      - planner-iteration
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:50066"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  sk-reinforcement:
+    image: openagx/caas-sk-reinforcement:latest
+    build:
+      context: .
+      dockerfile: services/sk-reinforcement/Dockerfile
+    ports:
+      - "50067:50067"
+    environment:
+      - BEHAVIORAL_GATE_ENDPOINT=behavioral-gate:50059
+      - INTENT_REGISTRY_ENDPOINT=intent-registry:50060
+      - COT_AUDITOR_ENDPOINT=cot-auditor:50061
+      - CONSTRAINT_INJECTOR_ENDPOINT=constraint-injector:50062
+      - DRIFT_SCORER_ENDPOINT=drift-scorer:50063
+      - MEMORY_ISOLATOR_ENDPOINT=memory-isolator:50064
+      - SYCOPHANCY_GUARD_ENDPOINT=sycophancy-guard:50065
+      - PLANNER_ITERATION_ENDPOINT=planner-iteration:50068
+      - KAFKA_BROKERS=${KAFKA_BROKERS}
+      - COGNITIVE_DRIFT_TOPIC=cognitive-drift-events
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      # Azure AI Content Safety — optional, enriches semantic guardrail
+      - AZURE_CONTENT_SAFETY_ENDPOINT=${AZURE_CONTENT_SAFETY_ENDPOINT:-}
+      - AZURE_CONTENT_SAFETY_KEY=${AZURE_CONTENT_SAFETY_KEY:-}
+      - GRPC_PORT=50067
+    networks:
+      - shared-infra_default
+    depends_on:
+      - behavioral-gate
+      - drift-scorer
+      - memory-isolator
+      - planner-iteration
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:50067"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  autogen-reinforcement:
+    image: openagx/caas-autogen-reinforcement:latest
+    build:
+      context: .
+      dockerfile: services/autogen-reinforcement/Dockerfile
+    ports:
+      - "50069:50069"
+    environment:
+      - BEHAVIORAL_GATE_ENDPOINT=behavioral-gate:50059
+      - INTENT_REGISTRY_ENDPOINT=intent-registry:50060
+      - COT_AUDITOR_ENDPOINT=cot-auditor:50061
+      - CONSTRAINT_INJECTOR_ENDPOINT=constraint-injector:50062
+      - DRIFT_SCORER_ENDPOINT=drift-scorer:50063
+      - MEMORY_ISOLATOR_ENDPOINT=memory-isolator:50064
+      - SYCOPHANCY_GUARD_ENDPOINT=sycophancy-guard:50065
+      - PLANNER_ITERATION_ENDPOINT=planner-iteration:50068
+      - TRUST_ENGINE_ENDPOINT=trust-engine:50053
+      - ENTITY_SERVICE_ENDPOINT=entity-service:50052
+      - FEDERATION_SERVICE_ENDPOINT=federation-service:50056
+      - KAFKA_BROKERS=${KAFKA_BROKERS}
+      - COGNITIVE_DRIFT_TOPIC=cognitive-drift-events
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - GRPC_PORT=50069
+    networks:
+      - shared-infra_default
+    depends_on:
+      - behavioral-gate
+      - drift-scorer
+      - memory-isolator
+      - trust-engine
+      - entity-service
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:50069"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
