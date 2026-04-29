@@ -60,15 +60,16 @@ FINAL: ALLOW only if SpiceDB = ALLOW AND OPA = ALLOW
 | decision-service | 50055 | Go |
 | authz-opa-sidecar | 8181 | OPA/Rego |
 
-### 2.3 Authorization Backend
+### 2.3 Authorization Stack
 
-AAGFE supports pluggable authorization backends:
+**Backend:** SpiceDB (Zanzibar database)
+**Protocol:** FGA (Fine-Grained Authorization) API for client interoperability
 
-| Backend | Type | Use Case |
-|--------|------|--------|
-| SpiceDB | Production | Scale, consistency |
-| OpenFGA | Alternative | Cloud-native |
-| Open Policy Agent | Policy | Complex rules |
+| Component | Technology | Purpose |
+|-----------|------------|---------|
+| SpiceDB | Database | Zanzibar tuples (ReBAC) |
+| OPA Sidecar | Policy | ABAC + behavioral + drift |
+| FGA Protocol | API | Client interface (OpenFGA-compatible) |
 
 ### 2.4 Data Model
 
@@ -228,21 +229,22 @@ Structured JSON logging with trace IDs:
 
 ## 8. Comparison
 
-| Feature | AAGFE | OpenZiti | Authzed | OpenFGA |
-|--------|-------|---------|--------|--------|
-| ReBAC | ✅ | Partial | ✅ | ✅ |
-| Behavioral Gate | ✅ | ❌ | ❌ | ❌ |
-| Drift Score | ✅ | ❌ | ❌ | ❌ |
-| OPA Integration | ✅ | ❌ | ❌ | ✅ |
-| Sub-ms Latency | ✅ | ❌ | Partial | Partial |
-| Agent Support | ✅ | ✅ | Partial | ✅ |
+| Feature | AAGFE | OpenZiti | Authzed |
+|--------|-------|---------|--------|
+| ReBAC (Zanzibar) | ✅ | Partial | ✅ |
+| Behavioral Gate | ✅ | ❌ | ❌ |
+| Drift Score | ✅ | ❌ | ❌ |
+| FGA Protocol | ✅ | ❌ | ✅ |
+| OPA Integration | ✅ | ❌ | ❌ |
+| Sub-ms Latency | ✅ | ❌ | Partial |
+| Agent Support | ✅ | ✅ | Partial |
 
 ---
 
 ## 9. References
 
 - Google Zanzibar: Google's Consistent, Global Authorization System (ATC '19)
-- OpenFGA: Fine-Grained Authorization (github.com/openfga/fga)
+- OpenFGA: Fine-Grained Authorization Protocol (github.com/openfga)
 - OWASP Top 10 for Agentic Applications (2025)
 - Open Policy Agent: Policy Language and Evaluation
 - W3C Decentralized Identifiers (DIDs) v1.0
