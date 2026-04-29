@@ -1,13 +1,13 @@
 syntax = "proto3";
 
-package caas.v1;
+package aagfe.v1;
 
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/struct.proto";
 
-option go_package = "github.com/OpenAGX/caas/gen/go/caas/v1;caasv1";
+option go_package = "github.com/openagx/aagfe/gen/go/caas/v1;caasv1";
 
-// EntityType enumerates the 6 core CAAS entity classes.
+// EntityType enumerates the 6 core AAGFE entity classes.
 enum EntityType {
   ENTITY_TYPE_UNSPECIFIED = 0;
   ENTITY_TYPE_HUMAN = 1;
@@ -28,7 +28,7 @@ enum LifecycleState {
   LIFECYCLE_STATE_ARCHIVED = 5;
 }
 
-// Entity is the core unit in CAAS — every digital entity that participates in authorization.
+// Entity is the core unit in AAGFE — every digital entity that participates in authorization.
 message Entity {
   string id = 1;
   string did = 2;
@@ -42,7 +42,7 @@ message Entity {
   google.protobuf.Timestamp revoked_at = 10;
 }
 
-// CreateEntityRequest creates a new entity in CAAS.
+// CreateEntityRequest creates a new entity in AAGFE.
 message CreateEntityRequest {
   EntityType entity_type = 1;
   string display_name = 2;

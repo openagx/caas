@@ -1,5 +1,5 @@
 # docker-compose.caas-v2.yml
-# CAAS v2 — Docker Compose additions only.
+# AAGFE v2 — Docker Compose additions only.
 # Merge this into the existing docker-compose.yml.
 # All services connect to shared-infra_default network.
 # Startup order: infra → CGL foundations → CGL scoring → enforcement → adapters
@@ -15,7 +15,7 @@ services:
   # ── CGL Layer — Phase 1: Foundations ──────────────────────────────────────
 
   intent-registry:
-    image: openagx/caas-intent-registry:latest
+    image: openagx/aagfe-intent-registry:latest
     build:
       context: .
       dockerfile: services/intent-registry/Dockerfile
@@ -41,7 +41,7 @@ services:
     restart: unless-stopped
 
   memory-isolator:
-    image: openagx/caas-memory-isolator:latest
+    image: openagx/aagfe-memory-isolator:latest
     build:
       context: .
       dockerfile: services/memory-isolator/Dockerfile
@@ -69,7 +69,7 @@ services:
   # ── CGL Layer — Phase 2: Observability ────────────────────────────────────
 
   cot-auditor:
-    image: openagx/caas-cot-auditor:latest
+    image: openagx/aagfe-cot-auditor:latest
     build:
       context: .
       dockerfile: services/cot-auditor/Dockerfile
@@ -97,7 +97,7 @@ services:
     restart: unless-stopped
 
   sycophancy-guard:
-    image: openagx/caas-sycophancy-guard:latest
+    image: openagx/aagfe-sycophancy-guard:latest
     build:
       context: .
       dockerfile: services/sycophancy-guard/Dockerfile
@@ -125,7 +125,7 @@ services:
 
   # NEW — Phase 2: Planner iteration service (PlannerIterationService)
   planner-iteration:
-    image: openagx/caas-planner-iteration:latest
+    image: openagx/aagfe-planner-iteration:latest
     build:
       context: .
       dockerfile: services/planner-iteration/Dockerfile
@@ -153,7 +153,7 @@ services:
     restart: unless-stopped
 
   constraint-injector:
-    image: openagx/caas-constraint-injector:latest
+    image: openagx/aagfe-constraint-injector:latest
     build:
       context: .
       dockerfile: services/constraint-injector/Dockerfile
@@ -182,7 +182,7 @@ services:
   # ── CGL Layer — Phase 3: Scoring ──────────────────────────────────────────
 
   drift-scorer:
-    image: openagx/caas-drift-scorer:latest
+    image: openagx/aagfe-drift-scorer:latest
     build:
       context: .
       dockerfile: services/drift-scorer/Dockerfile
@@ -216,7 +216,7 @@ services:
   # ── AuthZ Core — Phase 4: Enforcement ────────────────────────────────────
 
   behavioral-gate:
-    image: openagx/caas-behavioral-gate:latest
+    image: openagx/aagfe-behavioral-gate:latest
     build:
       context: .
       dockerfile: services/behavioral-gate/Dockerfile
@@ -252,7 +252,7 @@ services:
   # ── Adapter Layer — Phase 5: Runtime Integration ──────────────────────────
 
   ak-reinforcement:
-    image: openagx/caas-ak-reinforcement:latest
+    image: openagx/aagfe-ak-reinforcement:latest
     build:
       context: .
       dockerfile: services/ak-reinforcement/Dockerfile
@@ -287,7 +287,7 @@ services:
     restart: unless-stopped
 
   sk-reinforcement:
-    image: openagx/caas-sk-reinforcement:latest
+    image: openagx/aagfe-sk-reinforcement:latest
     build:
       context: .
       dockerfile: services/sk-reinforcement/Dockerfile
@@ -325,7 +325,7 @@ services:
     restart: unless-stopped
 
   autogen-reinforcement:
-    image: openagx/caas-autogen-reinforcement:latest
+    image: openagx/aagfe-autogen-reinforcement:latest
     build:
       context: .
       dockerfile: services/autogen-reinforcement/Dockerfile

@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package caas.v1;
+package aagfe.v1;
 
-option go_package = "github.com/OpenAGX/caas/gen/go/caas/v1;caasv1";
+option go_package = "github.com/openagx/aagfe/gen/go/caas/v1;caasv1";
 
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/struct.proto";
@@ -10,7 +10,7 @@ import "google/protobuf/struct.proto";
 // ============================================================
 // SKReinforcementService — port 50067
 //
-// Semantic Kernel (SK) reinforcement adapter for CAAS v2 CGL.
+// Semantic Kernel (SK) reinforcement adapter for AAGFE v2 CGL.
 //
 // SK advantages over AK that this adapter leverages:
 //   1. IFunctionInvocationFilter fires PRE and POST in a single

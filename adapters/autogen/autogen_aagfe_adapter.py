@@ -1,13 +1,13 @@
 """
 autogen_caas_adapter.py
 =======================
-CAAS v2 — AutoGen v0.4 reinforcement adapter.
+AAGFE v2 — AutoGen v0.4 reinforcement adapter.
 Wires AutoGen's actor model to AutoGenReinforcementService (port 50069).
 
 AutoGen v0.4 integration points:
   MessageInterceptor  — fires on ALL inter-agent messages (pre+post)
   ToolCallInterceptor — fires specifically on tool_call messages
-  CAASTerminationCondition — pluggable termination backed by CGL drift score
+  AAGFETerminationCondition — pluggable termination backed by CGL drift score
   StateBoundaryHook   — wraps save_state / load_state for memory isolation
   CompletionHook      — post-completion structured history submission
 
@@ -18,20 +18,20 @@ Key advantages over SK and AK adapters:
   4. Termination condition is first-class — BLOCK maps directly
 
 Usage:
-    from autogen_caas_adapter import CAASAutoGenAdapter, CAASAutoGenConfig
+    from autogen_caas_adapter import AAGFEAutoGenAdapter, AAGFEAutoGenConfig
     from autogen_agentchat.agents import AssistantAgent
     from autogen_agentchat.teams import RoundRobinGroupChat
 
-    config = CAASAutoGenConfig(
+    config = AAGFEAutoGenConfig(
         endpoint="localhost:50069",
         task_declared_goal="Analyse Q3 revenue and produce report",
         permitted_tools=["sql_query", "file_write"],
         permitted_handoff_targets=["chart_agent"],
         max_rounds=20,
     )
-    adapter = CAASAutoGenAdapter(config)
+    adapter = AAGFEAutoGenAdapter(config)
 
-    # Register actors (maps AutoGen agents to CAAS entities)
+    # Register actors (maps AutoGen agents to AAGFE entities)
     assistant_entity = await adapter.register_actor(
         autogen_agent_id="assistant",
         autogen_agent_type="AssistantAgent",
@@ -47,14 +47,14 @@ Usage:
         team_name="revenue_team",
     )
 
-    # Wrap agents with CAAS interceptors
-    assistant = CAASAssistantAgent(
+    # Wrap agents with AAGFE interceptors
+    assistant = AAGFEAssistantAgent(
         name="assistant",
         model_client=...,
         caas_adapter=adapter,
     )
 
-    # Use CAAS termination condition
+    # Use AAGFE termination condition
     team = RoundRobinGroupChat(
         [assistant, chart_agent],
         termination_condition=adapter.termination_condition,
@@ -77,13 +77,13 @@ from typing import Any, Callable, Optional, Sequence
 
 import grpc
 
-logger = logging.getLogger("caas.autogen_adapter")
+logger = logging.getLogger("aagfe.autogen_adapter")
 
 
 # ─── Config ──────────────────────────────────────────────────────────────────
 
 @dataclass
-class CAASAutoGenConfig:
+class AAGFEAutoGenConfig:
     endpoint: str                               # e.g. "localhost:50069"
     task_declared_goal: str
     permitted_tools: list[str]                  = field(default_factory=list)
@@ -100,36 +100,36 @@ class CAASAutoGenConfig:
 
 # ─── Exceptions ───────────────────────────────────────────────────────────────
 
-class CAASMessageBlockedError(Exception):
+class AAGFEMessageBlockedError(Exception):
     def __init__(self, reason: str, drift_score: int, review_token: str = ""):
         self.reason = reason
         self.drift_score = drift_score
         self.review_token = review_token
-        super().__init__(f"CAAS BLOCK: {reason} (drift={drift_score})")
+        super().__init__(f"AAGFE BLOCK: {reason} (drift={drift_score})")
 
-class CAASHandoffBlockedError(Exception):
+class AAGFEHandoffBlockedError(Exception):
     def __init__(self, reason: str, lateral_risk: float = 0.0):
         self.lateral_risk = lateral_risk
-        super().__init__(f"CAAS HANDOFF BLOCK: {reason} (lateral_risk={lateral_risk:.2f})")
+        super().__init__(f"AAGFE HANDOFF BLOCK: {reason} (lateral_risk={lateral_risk:.2f})")
 
-class CAASTerminateSignal(Exception):
+class AAGFETerminateSignal(Exception):
     """Raised by termination condition to stop AutoGen loop."""
     def __init__(self, reason: str, cause: str, drift_score: int):
         self.reason = reason
         self.cause = cause
         self.drift_score = drift_score
-        super().__init__(f"CAAS TERMINATE: {reason} (cause={cause} drift={drift_score})")
+        super().__init__(f"AAGFE TERMINATE: {reason} (cause={cause} drift={drift_score})")
 
 
 # ─── Main adapter ─────────────────────────────────────────────────────────────
 
-class CAASAutoGenAdapter:
+class AAGFEAutoGenAdapter:
     """
-    AutoGen v0.4 CAAS reinforcement adapter.
+    AutoGen v0.4 AAGFE reinforcement adapter.
     One instance per team / group chat session.
     """
 
-    def __init__(self, config: CAASAutoGenConfig):
+    def __init__(self, config: AAGFEAutoGenConfig):
         self.config = config
         self._channel: Optional[grpc.aio.Channel] = None
         self._stub = None
@@ -138,22 +138,22 @@ class CAASAutoGenAdapter:
         self._round: int = 0
         self._pending_system_message: Optional[str] = None
         self._entity_registry: dict[str, str] = {}  # autogen_agent_id → entity_id
-        self._termination_condition = CAASTerminationCondition(self)
+        self._termination_condition = AAGFETerminationCondition(self)
 
     # ── Properties ────────────────────────────────────────────────────────────
 
     @property
-    def termination_condition(self) -> "CAASTerminationCondition":
+    def termination_condition(self) -> "AAGFETerminationCondition":
         """Pass to AutoGen RoundRobinGroupChat or SelectorGroupChat."""
         return self._termination_condition
 
-    def get_message_interceptor(self) -> "CAASMessageInterceptor":
+    def get_message_interceptor(self) -> "AAGFEMessageInterceptor":
         """Pass to AutoGen agent as message_interceptor."""
-        return CAASMessageInterceptor(self)
+        return AAGFEMessageInterceptor(self)
 
-    def get_state_hooks(self) -> "CAASStateBoundaryHook":
+    def get_state_hooks(self) -> "AAGFEStateBoundaryHook":
         """Wraps save_state / load_state calls."""
-        return CAASStateBoundaryHook(self)
+        return AAGFEStateBoundaryHook(self)
 
     # ── Connection ────────────────────────────────────────────────────────────
 
@@ -163,7 +163,7 @@ class CAASAutoGenAdapter:
             self._channel = grpc.aio.secure_channel(self.config.endpoint, creds)
         else:
             self._channel = grpc.aio.insecure_channel(self.config.endpoint)
-        logger.info("CAAS AutoGen adapter connected to %s", self.config.endpoint)
+        logger.info("AAGFE AutoGen adapter connected to %s", self.config.endpoint)
 
     async def close_connection(self) -> None:
         if self._channel:
@@ -179,8 +179,8 @@ class CAASAutoGenAdapter:
         initial_trust_score: int = 0,
     ) -> str:
         """
-        Register an AutoGen agent actor as a CAAS entity.
-        Returns CAAS entity_id — use in all subsequent calls.
+        Register an AutoGen agent actor as a AAGFE entity.
+        Returns AAGFE entity_id — use in all subsequent calls.
         """
         req = {
             "autogen_agent_id":    autogen_agent_id,
@@ -192,7 +192,7 @@ class CAASAutoGenAdapter:
         resp = _stub_register_actor(req)
         entity_id = resp["entity_id"]
         self._entity_registry[autogen_agent_id] = entity_id
-        logger.info("CAAS actor registered: %s → entity_id=%s", autogen_agent_id, entity_id)
+        logger.info("AAGFE actor registered: %s → entity_id=%s", autogen_agent_id, entity_id)
         return entity_id
 
     async def deregister_actor(self, autogen_agent_id: str) -> None:
@@ -238,7 +238,7 @@ class CAASAutoGenAdapter:
         if resp.get("termination_condition_id"):
             self._termination_condition.condition_id = resp["termination_condition_id"]
 
-        logger.info("CAAS AutoGen task registered: %s", self._task_id)
+        logger.info("AAGFE AutoGen task registered: %s", self._task_id)
         return self._task_id
 
     async def close_task(
@@ -258,7 +258,7 @@ class CAASAutoGenAdapter:
             "total_rounds": total_rounds or self._round,
         })
         logger.info(
-            "CAAS AutoGen task closed: %s | drift=%d | blocked_msgs=%d | handoffs=%d",
+            "AAGFE AutoGen task closed: %s | drift=%d | blocked_msgs=%d | handoffs=%d",
             self._task_id,
             resp.get("final_drift_score", 0),
             resp.get("blocked_messages", 0),
@@ -280,8 +280,8 @@ class CAASAutoGenAdapter:
     ) -> dict:
         """
         Central intercept for all AutoGen inter-agent messages.
-        Raises CAASMessageBlockedError on BLOCK (PRE phase only).
-        Raises CAASHandoffBlockedError for blocked HandoffMessages.
+        Raises AAGFEMessageBlockedError on BLOCK (PRE phase only).
+        Raises AAGFEHandoffBlockedError for blocked HandoffMessages.
         """
         self._round += 1 if phase == "PRE" else 0
 
@@ -311,24 +311,24 @@ class CAASAutoGenAdapter:
         reason  = resp.get("reason", "")
 
         logger.debug(
-            "CAAS MessageIntercept %s: sender=%s type=%s verdict=%s drift=%d latency=%dms",
+            "AAGFE MessageIntercept %s: sender=%s type=%s verdict=%s drift=%d latency=%dms",
             phase, sender_autogen_id, message_type, verdict, drift, latency_ms,
         )
 
         if verdict == "BLOCK" and phase == "PRE":
             if is_handoff:
-                raise CAASHandoffBlockedError(reason, resp.get("lateral_risk_score", 0.0))
-            raise CAASMessageBlockedError(reason, drift, resp.get("review_token", ""))
+                raise AAGFEHandoffBlockedError(reason, resp.get("lateral_risk_score", 0.0))
+            raise AAGFEMessageBlockedError(reason, drift, resp.get("review_token", ""))
 
         if verdict in ("WARN", "STRONG_WARN") and phase == "PRE":
-            logger.warning("CAAS %s: sender=%s drift=%d signals=%s",
+            logger.warning("AAGFE %s: sender=%s drift=%d signals=%s",
                            verdict, sender_autogen_id, drift,
                            [s.get("type") for s in resp.get("signals", [])])
             remediation = resp.get("remediation", "NONE")
             if remediation == "INJECT_SYSTEM":
                 await self._fetch_system_injection()
             elif remediation == "TERMINATE":
-                raise CAASTerminateSignal(reason, "DRIFT_BLOCK", drift)
+                raise AAGFETerminateSignal(reason, "DRIFT_BLOCK", drift)
 
         return resp
 
@@ -369,7 +369,7 @@ class CAASAutoGenAdapter:
         verdict = resp.get("verdict", "ALLOW")
 
         if verdict == "BLOCK":
-            raise CAASMessageBlockedError(
+            raise AAGFEMessageBlockedError(
                 resp.get("reason", ""), resp.get("drift_score", 0), resp.get("review_token", "")
             )
         return resp
@@ -378,7 +378,7 @@ class CAASAutoGenAdapter:
         try:
             _stub_tool_call_intercept(req)
         except Exception as e:
-            logger.warning("CAAS ToolCallIntercept POST failed: %s", e)
+            logger.warning("AAGFE ToolCallIntercept POST failed: %s", e)
 
     # ── Completion hook ───────────────────────────────────────────────────────
 
@@ -418,7 +418,7 @@ class CAASAutoGenAdapter:
             if resp.get("inject_system_message") and resp.get("system_message_fragment"):
                 self._pending_system_message = resp["system_message_fragment"]
         except Exception as e:
-            logger.warning("CAAS CompletionHook failed (non-blocking): %s", e)
+            logger.warning("AAGFE CompletionHook failed (non-blocking): %s", e)
 
     # ── Termination check ─────────────────────────────────────────────────────
 
@@ -430,7 +430,7 @@ class CAASAutoGenAdapter:
         last_message_content: str = "",
         entity_id: str = "",
     ) -> tuple[bool, str]:
-        """Returns (terminate, reason). Called by CAASTerminationCondition."""
+        """Returns (terminate, reason). Called by AAGFETerminationCondition."""
         req = {
             "agent_entity_id":       entity_id or list(self._entity_registry.values())[0] if self._entity_registry else "",
             "task_id":               self._task_id,
@@ -466,7 +466,7 @@ class CAASAutoGenAdapter:
         }
         resp = _stub_pre_state_save(req)
         if resp.get("redact_keys"):
-            logger.info("CAAS state save: redacting %d keys", len(resp["redact_keys"]))
+            logger.info("AAGFE state save: redacting %d keys", len(resp["redact_keys"]))
         return resp
 
     async def post_state_load(
@@ -491,12 +491,12 @@ class CAASAutoGenAdapter:
 
         if resp.get("bleed_detected"):
             logger.warning(
-                "CAAS state load: memory bleed detected — %s | removed=%s",
+                "AAGFE state load: memory bleed detected — %s | removed=%s",
                 resp.get("bleed_detail"), resp.get("removed_keys"),
             )
 
         if not resp.get("proceed", True):
-            logger.error("CAAS state load BLOCKED: %s", resp.get("bleed_detail"))
+            logger.error("AAGFE state load BLOCKED: %s", resp.get("bleed_detail"))
             return "{}"
 
         return resp.get("sanitised_state_json", state_json)
@@ -515,7 +515,7 @@ class CAASAutoGenAdapter:
     async def _fetch_system_injection(self) -> None:
         # In real implementation: call constraint-injector via sk-reinforcement
         # For now just log — system message will arrive via CompletionHook response
-        logger.info("CAAS: constraint injection requested for next round")
+        logger.info("AAGFE: constraint injection requested for next round")
 
     def _hash8(self, s: str) -> str:
         return hashlib.sha256(s.encode()).hexdigest()[:16]
@@ -523,15 +523,15 @@ class CAASAutoGenAdapter:
 
 # ─── AutoGen integration classes ──────────────────────────────────────────────
 
-class CAASMessageInterceptor:
+class AAGFEMessageInterceptor:
     """
-    AutoGen message interceptor backed by CAAS.
+    AutoGen message interceptor backed by AAGFE.
     Register with AutoGen agent's message_interceptor parameter.
     Intercepts ALL inter-agent messages pre and post.
-    This is the primary CAAS enforcement surface for AutoGen.
+    This is the primary AAGFE enforcement surface for AutoGen.
     """
 
-    def __init__(self, adapter: CAASAutoGenAdapter):
+    def __init__(self, adapter: AAGFEAutoGenAdapter):
         self._adapter = adapter
 
     async def process(self, messages: list[Any], sender: Any, recipient: Any) -> list[Any] | None:
@@ -539,7 +539,7 @@ class CAASMessageInterceptor:
         AutoGen message interceptor interface.
         Returns None to allow messages through.
         Returns empty list to block.
-        Raises CAASMessageBlockedError to hard-stop.
+        Raises AAGFEMessageBlockedError to hard-stop.
         """
         for msg in messages:
             msg_type   = type(msg).__name__
@@ -557,16 +557,16 @@ class CAASMessageInterceptor:
                     message_content     = msg_content if isinstance(msg_content, str) else json.dumps(msg_content),
                     phase               = "PRE",
                 )
-            except (CAASMessageBlockedError, CAASHandoffBlockedError) as e:
-                logger.error("CAAS interceptor blocked message: %s", e)
+            except (AAGFEMessageBlockedError, AAGFEHandoffBlockedError) as e:
+                logger.error("AAGFE interceptor blocked message: %s", e)
                 return []  # Block all messages in this batch
-            except CAASTerminateSignal:
+            except AAGFETerminateSignal:
                 return []  # Signal termination
 
         return None  # Allow through
 
 
-class CAASTerminationCondition:
+class AAGFETerminationCondition:
     """
     AutoGen pluggable termination condition backed by CGL drift score.
     Pass to RoundRobinGroupChat or SelectorGroupChat as termination_condition.
@@ -575,7 +575,7 @@ class CAASTerminationCondition:
     Returns True when CGL says TERMINATE (drift >= BLOCK threshold).
     """
 
-    def __init__(self, adapter: CAASAutoGenAdapter):
+    def __init__(self, adapter: AAGFEAutoGenAdapter):
         self._adapter = adapter
         self.condition_id: str = ""
         self._terminated = False
@@ -607,10 +607,10 @@ class CAASTerminationCondition:
 
         if terminate:
             self._terminated = True
-            logger.warning("CAAS termination condition fired: %s", reason)
+            logger.warning("AAGFE termination condition fired: %s", reason)
             # Return a StopMessage — AutoGen will halt the loop
             # from autogen_agentchat.messages import StopMessage
-            # return StopMessage(content=f"CAAS: {reason}", source="caas_termination")
+            # return StopMessage(content=f"AAGFE: {reason}", source="caas_termination")
             return _stub_stop_message(reason)
 
         return None
@@ -619,14 +619,14 @@ class CAASTerminationCondition:
         self._terminated = False
 
 
-class CAASStateBoundaryHook:
+class AAGFEStateBoundaryHook:
     """
-    Wraps AutoGen save_state / load_state with CAAS memory isolation.
+    Wraps AutoGen save_state / load_state with AAGFE memory isolation.
     AutoGen v0.4 provides full state snapshots — memory-isolator
     gets the complete picture without needing a key registry.
     """
 
-    def __init__(self, adapter: CAASAutoGenAdapter):
+    def __init__(self, adapter: AAGFEAutoGenAdapter):
         self._adapter = adapter
 
     async def wrap_save_state(
@@ -676,7 +676,7 @@ class CAASStateBoundaryHook:
         )
         sanitised = json.loads(sanitised_json) if sanitised_json else {}
         # await agent.load_state(sanitised)  # AutoGen API
-        logger.debug("CAAS state loaded for agent %s (%d keys)", getattr(agent, "name", ""), len(sanitised))
+        logger.debug("AAGFE state loaded for agent %s (%d keys)", getattr(agent, "name", ""), len(sanitised))
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -740,4 +740,4 @@ def _stub_agent_state() -> dict:
     return {"messages": [], "memory": {}}
 
 def _stub_stop_message(reason: str) -> dict:
-    return {"type": "StopMessage", "content": f"CAAS: {reason}", "source": "caas_termination"}
+    return {"type": "StopMessage", "content": f"AAGFE: {reason}", "source": "caas_termination"}

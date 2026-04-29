@@ -1,10 +1,10 @@
 syntax = "proto3";
 
-package caas.v1;
+package aagfe.v1;
 
 import "google/protobuf/timestamp.proto";
 
-option go_package = "github.com/OpenAGX/caas/gen/go/caas/v1;caasv1";
+option go_package = "github.com/openagx/aagfe/gen/go/caas/v1;caasv1";
 
 // TrustDimensions holds the 7-dimension trust score breakdown.
 message TrustDimensions {

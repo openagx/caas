@@ -1,4 +1,4 @@
-"""CAAS API client."""
+"""AAGFE API client."""
 
 from __future__ import annotations
 
@@ -10,17 +10,17 @@ from .types import AuthorityTier, EntityType, VoteType
 
 
 class CaasError(Exception):
-    """Error from the CAAS API."""
+    """Error from the AAGFE API."""
 
     def __init__(self, status_code: int, body: str, path: str):
         self.status_code = status_code
         self.body = body
         self.path = path
-        super().__init__(f"CAAS API error {status_code} on {path}: {body}")
+        super().__init__(f"AAGFE API error {status_code} on {path}: {body}")
 
 
 class CaasClient:
-    """Client for the CAAS API Gateway.
+    """Client for the AAGFE API Gateway.
 
     Usage::
 

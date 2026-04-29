@@ -1,9 +1,9 @@
-# CAAS v2 — Runtime Adapters
+# AAGFE v2 — Runtime Adapters
 
-Reinforcement adapters that connect agent runtimes to the CAAS v2
+Reinforcement adapters that connect agent runtimes to the AAGFE v2
 Cognitive Guard Layer (CGL). Each adapter exposes the CGL integration
 contract to a specific runtime without requiring changes to the
-underlying CAAS authZ core.
+underlying AAGFE authZ core.
 
 ## Adapters
 

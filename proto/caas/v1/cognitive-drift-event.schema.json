@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://github.com/OpenAGX/caas/schemas/cognitive-drift-event/v2.json",
+  "$id": "https://github.com/openagx/aagfe/schemas/cognitive-drift-event/v2.json",
   "title": "CognitiveDriftEvent",
   "description": "Schema v2 for cognitive-drift-events Redpanda topic. All CGL services, SK adapter, AK adapter, and planner-iteration service publish here.",
   "type": "object",

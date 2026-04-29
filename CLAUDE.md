@@ -1,11 +1,11 @@
-# CAAS — Continuous Autonomous Authorization System
+# AAGFE — Agentic Automation Governance For Every Entity
 
 ## What This Is
 
-CAAS is a **Zero Trust authorization infrastructure** for all digital entities. It combines Google Zanzibar-style relationship-based access control (ReBAC) with social graph trust scoring, real-time fraud detection, and human decision integrity — designed for sovereign deployment.
+AAGFE is a **Zero Trust authorization infrastructure** for all digital entities. It combines Google Zanzibar-style relationship-based access control (ReBAC) with social graph trust scoring, real-time fraud detection, and human decision integrity — designed for sovereign deployment.
 
 **Company**: OpenAutonomyx (OPC) Private Limited
-**Repo**: github.com/OpenAGX/caas
+**Repo**: github.com/openagx/aagfe
 
 ## Architecture
 

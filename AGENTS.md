@@ -11,12 +11,12 @@ OpenAGX provides cloud infrastructure and runtime services for AI agents, comput
 Primary OpenAGX repositories include:
 
 ```text
-OpenAGX/caas       cloud agent-as-a-service platform and deployment configuration
+openagx/aagfe       cloud agent-as-a-service platform and deployment configuration
 OpenAGX/cai        computer-use AI and agent automation framework
 OpenAGX/midpoint   identity governance and access management integration
 ```
 
-Use `OpenAGX/caas` as the source of truth for cloud-agent deployment, runtime, operations, and infrastructure guidance.
+Use `openagx/aagfe` as the source of truth for cloud-agent deployment, runtime, operations, and infrastructure guidance.
 
 ## Agent operating principles
 

@@ -1,4 +1,4 @@
-"""CAAS Python SDK — Client for the Continuous Autonomous Authorization System API."""
+"""AAGFE Python SDK — Client for the Agentic Automation Governance For Every Entity API."""
 
 from .client import CaasClient, CaasError
 from .types import (

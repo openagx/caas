@@ -1,5 +1,5 @@
-// CAASSKFilters.cs
-// CAAS v2 — Semantic Kernel filter implementations
+// AAGFESKFilters.cs
+// AAGFE v2 — Semantic Kernel filter implementations
 // Wires IFunctionInvocationFilter, IAutoFunctionInvocationFilter,
 // and IPromptRenderFilter to SKReinforcementService (port 50067).
 //
@@ -8,7 +8,7 @@
 //       .AddOpenAIChatCompletion(...)
 //       .Build();
 //
-//   var caas = new CAASKernelFilters(new CAASKernelConfig
+//   var caas = new AAGFEKernelFilters(new AAGFEKernelConfig
 //   {
 //       Endpoint       = "localhost:50067",
 //       AgentEntityId  = "agent:my-agent-001",
@@ -39,11 +39,11 @@ using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
 using Microsoft.SemanticKernel;
 
-namespace OpenAutonomyx.CAAS.SK;
+namespace OpenAutonomyx.AAGFE.SK;
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
-public record CAASKernelConfig
+public record AAGFEKernelConfig
 {
     public required string Endpoint       { get; init; }
     public required string AgentEntityId  { get; init; }
@@ -70,25 +70,25 @@ public enum SKRuntime { DotNet = 1, Python = 2, Java = 3 }
 
 // ─── Exceptions ───────────────────────────────────────────────────────────────
 
-public class CAASFunctionBlockedException(string reason, int driftScore, string reviewToken = "")
-    : Exception($"CAAS BLOCK: {reason} (drift={driftScore})")
+public class AAGFEFunctionBlockedException(string reason, int driftScore, string reviewToken = "")
+    : Exception($"AAGFE BLOCK: {reason} (drift={driftScore})")
 {
     public string Reason      { get; } = reason;
     public int    DriftScore  { get; } = driftScore;
     public string ReviewToken { get; } = reviewToken;
 }
 
-public class CAASPlannerTerminatedException(string reason)
-    : Exception($"CAAS PLANNER TERMINATE: {reason}");
+public class AAGFEPlannerTerminatedException(string reason)
+    : Exception($"AAGFE PLANNER TERMINATE: {reason}");
 
-public class CAASAgentMessageBlockedException(string reason)
-    : Exception($"CAAS A2A BLOCK: {reason}");
+public class AAGFEAgentMessageBlockedException(string reason)
+    : Exception($"AAGFE A2A BLOCK: {reason}");
 
 // ─── Main filter class ────────────────────────────────────────────────────────
 
-public sealed class CAASKernelFilters : IDisposable
+public sealed class AAGFEKernelFilters : IDisposable
 {
-    private readonly CAASKernelConfig     _config;
+    private readonly AAGFEKernelConfig     _config;
     private readonly ILogger?             _logger;
     private readonly GrpcChannel         _channel;
 
@@ -100,7 +100,7 @@ public sealed class CAASKernelFilters : IDisposable
     private int     _iteration;
     private string? _pendingFragment;
 
-    public CAASKernelFilters(CAASKernelConfig config, ILogger? logger = null)
+    public AAGFEKernelFilters(AAGFEKernelConfig config, ILogger? logger = null)
     {
         _config  = config;
         _logger  = logger;
@@ -151,7 +151,7 @@ public sealed class CAASKernelFilters : IDisposable
         if (!string.IsNullOrEmpty(resp.InitialConstraintFragment))
             _pendingFragment = resp.InitialConstraintFragment;
 
-        _logger?.LogInformation("CAAS task registered: {TaskId}", _taskId);
+        _logger?.LogInformation("AAGFE task registered: {TaskId}", _taskId);
         return _taskId;
     }
 
@@ -179,7 +179,7 @@ public sealed class CAASKernelFilters : IDisposable
         var purgeResp = await PurgeTaskMemoryAsync(ct);
 
         _logger?.LogInformation(
-            "CAAS task closed: {TaskId} | drift={Drift} | purged={Purged} keys",
+            "AAGFE task closed: {TaskId} | drift={Drift} | purged={Purged} keys",
             _taskId, closeResp.FinalDriftScore, purgeResp.KeysPurged);
 
         _taskId = null;
@@ -215,12 +215,12 @@ public sealed class CAASKernelFilters : IDisposable
                 // var resp = await stub.RegisterMemoryKeyAsync(MapToProto(req));
                 var resp = StubRegisterMemoryKey(req);
                 if (resp.BleedRisk)
-                    _logger?.LogWarning("CAAS memory bleed risk: key={Key} origin={Origin}",
+                    _logger?.LogWarning("AAGFE memory bleed risk: key={Key} origin={Origin}",
                         key, resp.OriginTaskId);
             }
             catch (Exception ex)
             {
-                _logger?.LogWarning("CAAS RegisterMemoryKey failed (non-blocking): {Ex}", ex.Message);
+                _logger?.LogWarning("AAGFE RegisterMemoryKey failed (non-blocking): {Ex}", ex.Message);
             }
         }, ct);
 
@@ -262,10 +262,10 @@ public sealed class CAASKernelFilters : IDisposable
         var resp = StubAgentMessageCheck(req);
 
         if (resp.Verdict == "BLOCK")
-            throw new CAASAgentMessageBlockedException(resp.Reason);
+            throw new AAGFEAgentMessageBlockedException(resp.Reason);
 
         if (resp.LateralRiskScore > 0.7f)
-            _logger?.LogWarning("CAAS A2A high lateral risk: receiver={Receiver} score={Score:F2}",
+            _logger?.LogWarning("AAGFE A2A high lateral risk: receiver={Receiver} score={Score:F2}",
                 receiverAgentEntityId, resp.LateralRiskScore);
     }
 
@@ -295,19 +295,19 @@ public sealed class CAASKernelFilters : IDisposable
         // var resp = await stub.FunctionInvocationFilterAsync(MapToProto(req), cancellationToken: ct);
         var resp = StubFunctionFilter(req);
 
-        _logger?.LogDebug("CAAS FunctionFilter PRE: fn={Fn} verdict={V} drift={D}",
+        _logger?.LogDebug("AAGFE FunctionFilter PRE: fn={Fn} verdict={V} drift={D}",
             ctx.Function.Name, resp.Verdict, resp.DriftScore);
 
         if (resp.Verdict == "BLOCK")
         {
-            _logger?.LogError("CAAS BLOCK: fn={Fn} reason={R} drift={D}",
+            _logger?.LogError("AAGFE BLOCK: fn={Fn} reason={R} drift={D}",
                 ctx.Function.Name, resp.Reason, resp.DriftScore);
-            throw new CAASFunctionBlockedException(resp.Reason, resp.DriftScore, resp.ReviewToken);
+            throw new AAGFEFunctionBlockedException(resp.Reason, resp.DriftScore, resp.ReviewToken);
         }
 
         if (resp.Verdict is "WARN" or "STRONG_WARN")
         {
-            _logger?.LogWarning("CAAS {V}: fn={Fn} reason={R} drift={D}",
+            _logger?.LogWarning("AAGFE {V}: fn={Fn} reason={R} drift={D}",
                 resp.Verdict, ctx.Function.Name, resp.Reason, resp.DriftScore);
             if (resp.Remediation == "INJECT_NEXT_TURN")
                 await FetchAndStashInjectionAsync(ct);
@@ -348,7 +348,7 @@ public sealed class CAASKernelFilters : IDisposable
             }
             catch (Exception ex)
             {
-                _logger?.LogWarning("CAAS FunctionFilter POST failed (non-blocking): {Ex}", ex.Message);
+                _logger?.LogWarning("AAGFE FunctionFilter POST failed (non-blocking): {Ex}", ex.Message);
             }
         }, ct);
         await Task.CompletedTask;
@@ -385,14 +385,14 @@ public sealed class CAASKernelFilters : IDisposable
         var resp = StubAutoFunctionFilter(req);
 
         _logger?.LogDebug(
-            "CAAS AutoFunctionFilter iter={I} verdict={V} drift={D} signals={S}",
+            "AAGFE AutoFunctionFilter iter={I} verdict={V} drift={D} signals={S}",
             _iteration, resp.Verdict, resp.DriftScore,
             string.Join(",", resp.Signals.Select(s => s.Type)));
 
         if (resp.TerminatePlanner)
         {
-            _logger?.LogError("CAAS TERMINATE PLANNER: iter={I} reason={R}", _iteration, resp.Reason);
-            throw new CAASPlannerTerminatedException(resp.Reason);
+            _logger?.LogError("AAGFE TERMINATE PLANNER: iter={I} reason={R}", _iteration, resp.Reason);
+            throw new AAGFEPlannerTerminatedException(resp.Reason);
         }
 
         if (resp.InjectBeforeNext && !string.IsNullOrEmpty(resp.ConstraintFragment))
@@ -426,7 +426,7 @@ public sealed class CAASKernelFilters : IDisposable
 
         if (resp.InjectionRequired && !string.IsNullOrEmpty(resp.ConstraintFragment))
         {
-            _logger?.LogInformation("CAAS constraint injection at prompt render turn={T}", _turn);
+            _logger?.LogInformation("AAGFE constraint injection at prompt render turn={T}", _turn);
             _pendingFragment = resp.ConstraintFragment;
         }
 
@@ -452,13 +452,13 @@ public sealed class CAASKernelFilters : IDisposable
         }
         catch (Exception ex)
         {
-            _logger?.LogWarning("CAAS injection fetch failed: {Ex}", ex.Message);
+            _logger?.LogWarning("AAGFE injection fetch failed: {Ex}", ex.Message);
         }
     }
 
     // ── Filter inner classes ──────────────────────────────────────────────────
 
-    private sealed class FunctionInvocationFilterImpl(CAASKernelFilters parent)
+    private sealed class FunctionInvocationFilterImpl(AAGFEKernelFilters parent)
         : IFunctionInvocationFilter
     {
         public async Task OnFunctionInvocationAsync(
@@ -473,11 +473,11 @@ public sealed class CAASKernelFilters : IDisposable
             {
                 await parent.HandleFunctionPreAsync(context, CancellationToken.None);
             }
-            catch (CAASFunctionBlockedException)
+            catch (AAGFEFunctionBlockedException)
             {
                 // Abort — do NOT call next()
                 blocked = true;
-                context.Result = new FunctionResult(context.Function, "Blocked by CAAS");
+                context.Result = new FunctionResult(context.Function, "Blocked by AAGFE");
                 throw;
             }
 
@@ -501,11 +501,11 @@ public sealed class CAASKernelFilters : IDisposable
         }
     }
 
-    private sealed class AutoFunctionInvocationFilterImpl(CAASKernelFilters parent)
+    private sealed class AutoFunctionInvocationFilterImpl(AAGFEKernelFilters parent)
         : IAutoFunctionInvocationFilter
     {
         // This fires on EACH iteration of the planner's auto-function loop.
-        // It gives CAAS v2 CGL visibility into reasoning BEFORE tool selection —
+        // It gives AAGFE v2 CGL visibility into reasoning BEFORE tool selection —
         // the most valuable hook in the SK filter system.
         public async Task OnAutoFunctionInvocationAsync(
             AutoFunctionInvocationContext context,
@@ -520,7 +520,7 @@ public sealed class CAASKernelFilters : IDisposable
                 resp = await parent.HandleAutoFunctionIterationAsync(
                     context, CancellationToken.None);
             }
-            catch (CAASPlannerTerminatedException)
+            catch (AAGFEPlannerTerminatedException)
             {
                 // Terminate the entire planner loop
                 context.Terminate = true;
@@ -535,7 +535,7 @@ public sealed class CAASKernelFilters : IDisposable
         }
     }
 
-    private sealed class PromptRenderFilterImpl(CAASKernelFilters parent)
+    private sealed class PromptRenderFilterImpl(AAGFEKernelFilters parent)
         : IPromptRenderFilter
     {
         public async Task OnPromptRenderAsync(

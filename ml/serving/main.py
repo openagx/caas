@@ -1,5 +1,5 @@
 """
-CAAS Trust ML Sidecar — FastAPI service for trust dimension scoring,
+AAGFE Trust ML Sidecar — FastAPI service for trust dimension scoring,
 Sybil detection, and anomalous trust pattern detection.
 
 Runs on port 8090, called by the trust-engine Go service.
@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from sklearn.ensemble import IsolationForest
 
-app = FastAPI(title="CAAS Trust ML Sidecar", version="0.1.0")
+app = FastAPI(title="AAGFE Trust ML Sidecar", version="0.1.0")
 
 # --- Models ---
 

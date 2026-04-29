@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package caas.v1;
+package aagfe.v1;
 
-option go_package = "github.com/OpenAGX/caas/gen/go/caas/v1;caasv1";
+option go_package = "github.com/openagx/aagfe/gen/go/caas/v1;caasv1";
 
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/struct.proto";
@@ -10,7 +10,7 @@ import "google/protobuf/struct.proto";
 // ============================================================
 // AutoGenReinforcementService — port 50069
 //
-// AutoGen v0.4 reinforcement adapter for CAAS v2 CGL.
+// AutoGen v0.4 reinforcement adapter for AAGFE v2 CGL.
 //
 // AutoGen v0.4 architectural model:
 //   - Distributed actor model (Orleans-derived)
@@ -28,7 +28,7 @@ import "google/protobuf/struct.proto";
 //   3. Termination conditions are pluggable — CGL TERMINATE
 //      directive hooks in as a first-class condition.
 //   4. Actor model means every agent has an explicit identity
-//      and message address — maps cleanly to CAAS entity types.
+//      and message address — maps cleanly to AAGFE entity types.
 //   5. ChatCompletionContext provides full history structurally.
 //
 // Gaps vs SK:
@@ -86,8 +86,8 @@ service AutoGenReinforcementService {
   rpc PostStateLoad(StateLoadRequest)  returns (StateLoadResponse);
 
   // ── Actor registration ───────────────────────────────────────
-  // Register an AutoGen agent actor as a CAAS entity.
-  // Maps AutoGen AgentId to CAAS entity_id (AI_AGENT type).
+  // Register an AutoGen agent actor as a AAGFE entity.
+  // Maps AutoGen AgentId to AAGFE entity_id (AI_AGENT type).
   rpc RegisterActor(RegisterActorRequest)   returns (RegisterActorResponse);
   rpc DeregisterActor(DeregisterActorRequest) returns (DeregisterActorResponse);
 
@@ -110,8 +110,8 @@ service AutoGenReinforcementService {
 //   MultiModalMessage → includes image/file — additional scope check
 
 message MessageInterceptRequest {
-  string sender_entity_id    = 1;  // Registered CAAS entity_id for sender
-  string receiver_entity_id  = 2;  // Registered CAAS entity_id for receiver
+  string sender_entity_id    = 1;  // Registered AAGFE entity_id for sender
+  string receiver_entity_id  = 2;  // Registered AAGFE entity_id for receiver
   string task_id             = 3;
   int32  round_number        = 4;  // AutoGen conversation round
   AutoGenMessageType message_type = 5;
@@ -392,7 +392,7 @@ message RegisterActorRequest {
   string autogen_agent_id   = 1;  // e.g. "assistant_agent"
   string autogen_agent_type = 2;  // e.g. "AssistantAgent", "UserProxyAgent"
   string task_id            = 3;
-  // CAAS entity type to register as
+  // AAGFE entity type to register as
   AutoGenEntityType entity_type = 4;
   // Initial trust score seed (0-1000); 0 = use default
   int32  initial_trust_score = 5;
@@ -407,7 +407,7 @@ enum AutoGenEntityType {
 }
 
 message RegisterActorResponse {
-  string entity_id    = 1;  // CAAS entity_id — use in all subsequent calls
+  string entity_id    = 1;  // AAGFE entity_id — use in all subsequent calls
   string trust_token  = 2;  // Short-lived trust attestation token
 }
 

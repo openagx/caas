@@ -1,7 +1,7 @@
 """
 ak_caas_adapter.py
 ==================
-Agent Kernel (AK) reinforcement adapter for CAAS v2 CGL.
+Agent Kernel (AK) reinforcement adapter for AAGFE v2 CGL.
 
 Drop this into any AK agent project. Wire it via AK's hook system.
 It provides everything AK does not:
@@ -13,13 +13,13 @@ It provides everything AK does not:
 
 Usage
 -----
-from ak_caas_adapter import CAASAdapter, CAASConfig
+from ak_caas_adapter import AAGFEAdapter, AAGFEConfig
 
-config = CAASConfig(
+config = AAGFEConfig(
     ak_reinforcement_endpoint="localhost:50066",
     agent_entity_id="agent:my-agent-001",
 )
-adapter = CAASAdapter(config)
+adapter = AAGFEAdapter(config)
 
 # In your AK agent definition:
 agent = Agent(
@@ -46,19 +46,19 @@ from typing import Any, Callable, Coroutine, Optional
 import grpc
 
 # Generated stubs — run `make proto` from caas repo root
-# from gen.go.caas.v1 import ak_reinforcement_pb2 as pb
-# from gen.go.caas.v1 import ak_reinforcement_pb2_grpc as pb_grpc
+# from gen.go.aagfe.v1 import ak_reinforcement_pb2 as pb
+# from gen.go.aagfe.v1 import ak_reinforcement_pb2_grpc as pb_grpc
 # Shown as typed stubs here for clarity:
 
-logger = logging.getLogger("caas.ak_adapter")
+logger = logging.getLogger("aagfe.ak_adapter")
 
 
 # ─── Config ──────────────────────────────────────────────────────────────────
 
 @dataclass
-class CAASConfig:
+class AAGFEConfig:
     ak_reinforcement_endpoint: str        # e.g. "localhost:50066"
-    agent_entity_id: str                  # Maps to CAAS entity-service AI_AGENT entity
+    agent_entity_id: str                  # Maps to AAGFE entity-service AI_AGENT entity
     framework: str = "LANGGRAPH"          # AK_FRAMEWORK_* enum name
     session_store: str = "IN_MEMORY"      # AK_SESSION_STORE_* enum name
     tls: bool = False
@@ -90,29 +90,29 @@ class AKRemediation(str, Enum):
 
 # ─── Exceptions ───────────────────────────────────────────────────────────────
 
-class CAASBlockError(Exception):
+class AAGFEBlockError(Exception):
     """Raised by pre_tool_hook when behavioral-gate returns BLOCK."""
     def __init__(self, reason: str, drift_score: int, review_token: str = ""):
         self.reason = reason
         self.drift_score = drift_score
         self.review_token = review_token
-        super().__init__(f"CAAS BLOCK: {reason} (drift={drift_score})")
+        super().__init__(f"AAGFE BLOCK: {reason} (drift={drift_score})")
 
-class CAASA2ABlockError(Exception):
+class AAGFEA2ABlockError(Exception):
     """Raised by a2a_hook when A2A intercept returns BLOCK."""
     def __init__(self, reason: str):
-        super().__init__(f"CAAS A2A BLOCK: {reason}")
+        super().__init__(f"AAGFE A2A BLOCK: {reason}")
 
 
 # ─── Adapter ─────────────────────────────────────────────────────────────────
 
-class CAASAdapter:
+class AAGFEAdapter:
     """
     AK reinforcement adapter. Instantiate once per agent process.
     Thread-safe; uses asyncio-native gRPC channel.
     """
 
-    def __init__(self, config: CAASConfig):
+    def __init__(self, config: AAGFEConfig):
         self.config = config
         self._channel: Optional[grpc.aio.Channel] = None
         self._stub = None
@@ -131,7 +131,7 @@ class CAASAdapter:
         else:
             self._channel = grpc.aio.insecure_channel(self.config.ak_reinforcement_endpoint)
         # self._stub = pb_grpc.AKReinforcementServiceStub(self._channel)
-        logger.info("CAAS adapter connected to %s", self.config.ak_reinforcement_endpoint)
+        logger.info("AAGFE adapter connected to %s", self.config.ak_reinforcement_endpoint)
 
     async def close(self) -> None:
         if self._channel:
@@ -178,7 +178,7 @@ class CAASAdapter:
         # Stash initial fragment to inject into first prompt
         if resp.get("initial_constraint_fragment"):
             self._pending_injection = resp["initial_constraint_fragment"]
-        logger.info("CAAS task registered: %s", self._task_id)
+        logger.info("AAGFE task registered: %s", self._task_id)
         return self._task_id
 
     async def on_task_end_hook(
@@ -214,7 +214,7 @@ class CAASAdapter:
         purge_resp = _stub_purge_memory(purge_req)
 
         logger.info(
-            "CAAS task closed: %s | drift=%d | purged=%d keys",
+            "AAGFE task closed: %s | drift=%d | purged=%d keys",
             self._task_id,
             close_resp.get("final_drift_score", 0),
             purge_resp.get("keys_purged", 0),
@@ -233,7 +233,7 @@ class CAASAdapter:
     ) -> None:
         """
         AK must call this synchronously before every tool dispatch.
-        Raises CAASBlockError if verdict is BLOCK — AK must not dispatch.
+        Raises AAGFEBlockError if verdict is BLOCK — AK must not dispatch.
         Logs WARN/STRONG_WARN and continues.
 
         This is the hook AK does not provide natively.
@@ -266,8 +266,8 @@ class CAASAdapter:
         )
 
         if verdict == "BLOCK":
-            logger.error("CAAS BLOCK: tool=%s reason=%s drift=%d", tool_name, reason, drift)
-            raise CAASBlockError(
+            logger.error("AAGFE BLOCK: tool=%s reason=%s drift=%d", tool_name, reason, drift)
+            raise AAGFEBlockError(
                 reason=reason,
                 drift_score=drift,
                 review_token=resp.get("review_token", ""),
@@ -275,7 +275,7 @@ class CAASAdapter:
 
         if verdict in ("WARN", "STRONG_WARN"):
             logger.warning(
-                "CAAS %s: tool=%s reason=%s drift=%d signals=%s",
+                "AAGFE %s: tool=%s reason=%s drift=%d signals=%s",
                 verdict, tool_name, reason, drift, resp.get("active_signals", []),
             )
             remediation = resp.get("remediation", "NONE")
@@ -284,7 +284,7 @@ class CAASAdapter:
             elif remediation == "RESET_SESSION":
                 await self._purge_memory_immediate()
             elif remediation == "ESCALATE_HUMAN":
-                logger.warning("CAAS: routing to M-of-N review, token=%s", resp.get("review_token"))
+                logger.warning("AAGFE: routing to M-of-N review, token=%s", resp.get("review_token"))
 
     # ── Post-tool record (supplements AK's existing post-hook) ───────────────
 
@@ -316,7 +316,7 @@ class CAASAdapter:
             # await self._stub.PostToolRecord(pb.PostToolRecordRequest(**req))
             _stub_post_tool(req)
         except Exception as e:
-            logger.warning("CAAS PostToolRecord failed (non-blocking): %s", e)
+            logger.warning("AAGFE PostToolRecord failed (non-blocking): %s", e)
 
     # ── LLM completion submission ─────────────────────────────────────────────
 
@@ -360,10 +360,10 @@ class CAASAdapter:
                 if sem_result.get("verdict") == "AUGMENT":
                     self._pending_injection = sem_result.get("constraint_fragment", "")
                 elif sem_result.get("verdict") == "BLOCK":
-                    logger.error("CAAS semantic guardrail BLOCK on completion: %s", sem_result.get("reason"))
+                    logger.error("AAGFE semantic guardrail BLOCK on completion: %s", sem_result.get("reason"))
                     # Emit as drift signal — cannot block post-completion but flags for next turn
             except asyncio.TimeoutError:
-                logger.debug("CAAS semantic guardrail timeout — skipped")
+                logger.debug("AAGFE semantic guardrail timeout — skipped")
 
         # Check injection schedule
         if self._turn % self.config.injection_interval_turns == 0:
@@ -378,7 +378,7 @@ class CAASAdapter:
             if resp.get("inject_next_turn"):
                 await self._fetch_and_stash_injection()
         except Exception as e:
-            logger.warning("CAAS SubmitCompletion failed (non-blocking): %s", e)
+            logger.warning("AAGFE SubmitCompletion failed (non-blocking): %s", e)
 
     async def _semantic_guardrail(
         self,
@@ -410,7 +410,7 @@ class CAASAdapter:
     ) -> None:
         """
         AK calls this before every A2A message dispatch.
-        Raises CAASA2ABlockError if verdict is BLOCK.
+        Raises AAGFEA2ABlockError if verdict is BLOCK.
         This closes the lateral movement surface in multi-agent topologies.
         """
         req = {
@@ -426,10 +426,10 @@ class CAASAdapter:
         resp = _stub_a2a_check(req)
 
         if resp.get("verdict") == "BLOCK":
-            raise CAASA2ABlockError(resp.get("reason", "A2A blocked by CAAS"))
+            raise AAGFEA2ABlockError(resp.get("reason", "A2A blocked by AAGFE"))
         if resp.get("lateral_risk_score", 0) > 0.7:
             logger.warning(
-                "CAAS A2A high lateral risk: receiver=%s score=%.2f",
+                "AAGFE A2A high lateral risk: receiver=%s score=%.2f",
                 receiver_agent_entity_id, resp["lateral_risk_score"],
             )
 
@@ -456,7 +456,7 @@ class CAASAdapter:
         resp = _stub_register_key(req)
         if resp.get("bleed_risk"):
             logger.warning(
-                "CAAS memory bleed risk: key=%s origin_task=%s",
+                "AAGFE memory bleed risk: key=%s origin_task=%s",
                 key, resp.get("origin_task_id"),
             )
         return resp
@@ -503,7 +503,7 @@ class CAASAdapter:
             if resp.get("injection_required"):
                 self._pending_injection = resp.get("fragment_text")
         except Exception as e:
-            logger.warning("CAAS injection fetch failed: %s", e)
+            logger.warning("AAGFE injection fetch failed: %s", e)
 
     async def _purge_memory_immediate(self) -> None:
         try:
@@ -516,7 +516,7 @@ class CAASAdapter:
             # await self._stub.PurgeTaskMemory(pb.PurgeTaskMemoryRequest(**req))
             _stub_purge_memory(req)
         except Exception as e:
-            logger.warning("CAAS immediate purge failed: %s", e)
+            logger.warning("AAGFE immediate purge failed: %s", e)
 
 
 # ─── Stub implementations (replace with generated gRPC stubs after `make proto`)

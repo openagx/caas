@@ -1,5 +1,5 @@
 """
-CAAS Fraud Pipeline — main entry point.
+AAGFE Fraud Pipeline — main entry point.
 
 Starts:
 1. Kafka event consumer (background thread)
@@ -32,7 +32,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 config = Config()
-app = FastAPI(title="CAAS Fraud Pipeline", version="0.1.0")
+app = FastAPI(title="AAGFE Fraud Pipeline", version="0.1.0")
 
 # Global instances (initialized on startup)
 store: FraudStore | None = None

@@ -1,6 +1,6 @@
-# CAAS (Continuous Autonomous Authorization System)
+# AAGFE (Agentic Automation Governance For Every Entity)
 
-CAAS is a zero-trust authorization platform composed of gRPC microservices and a REST API gateway.
+AAGFE is a zero-trust authorization platform composed of gRPC microservices and a REST API gateway.
 
 ## Production quick start
 

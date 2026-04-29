@@ -1,4 +1,4 @@
-"""Type definitions for CAAS SDK."""
+"""Type definitions for AAGFE SDK."""
 
 from enum import IntEnum
 

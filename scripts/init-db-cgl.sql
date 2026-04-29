@@ -1,5 +1,5 @@
 -- init-db-cgl.sql
--- CAAS v2 — CGL PostgreSQL schema additions
+-- AAGFE v2 — CGL PostgreSQL schema additions
 -- Append to existing scripts/init-db.sql
 -- All tables: soft delete, audit timestamps, Redpanda event on state change
 
@@ -286,7 +286,7 @@ COMMENT ON TABLE cgl_sycophancy         IS 'sycophancy-guard: detected patterns 
 
 -- ─── cgl_autogen_actors ───────────────────────────────────────────────────
 -- Owner: autogen-reinforcement (port 50069)
--- Maps AutoGen agent actor IDs to CAAS entity IDs.
+-- Maps AutoGen agent actor IDs to AAGFE entity IDs.
 
 CREATE TABLE IF NOT EXISTS cgl_autogen_actors (
     id                  UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -358,6 +358,6 @@ CREATE TABLE IF NOT EXISTS cgl_state_boundaries (
 CREATE INDEX idx_cgl_state_boundaries_task  ON cgl_state_boundaries (task_id);
 CREATE INDEX idx_cgl_state_boundaries_bleed ON cgl_state_boundaries (bleed_detected) WHERE bleed_detected = TRUE;
 
-COMMENT ON TABLE cgl_autogen_actors    IS 'autogen-reinforcement: AutoGen actor → CAAS entity mapping';
+COMMENT ON TABLE cgl_autogen_actors    IS 'autogen-reinforcement: AutoGen actor → AAGFE entity mapping';
 COMMENT ON TABLE cgl_autogen_messages  IS 'autogen-reinforcement: all intercepted inter-agent messages';
 COMMENT ON TABLE cgl_state_boundaries  IS 'autogen-reinforcement: save_state/load_state boundaries for memory isolation';

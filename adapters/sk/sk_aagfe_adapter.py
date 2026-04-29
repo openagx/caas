@@ -1,7 +1,7 @@
 """
 sk_caas_adapter.py
 ==================
-CAAS v2 — Semantic Kernel Python adapter.
+AAGFE v2 — Semantic Kernel Python adapter.
 Wires SK's three filter interfaces to SKReinforcementService (port 50067).
 
 SK Python filter interfaces:
@@ -10,13 +10,13 @@ SK Python filter interfaces:
   - PromptRenderFilter (pre + post prompt assembly)
 
 Usage:
-    from sk_caas_adapter import CAASSKAdapter, CAASSKConfig
+    from sk_caas_adapter import AAGFESKAdapter, AAGFESKConfig
 
-    config = CAASSKConfig(
+    config = AAGFESKConfig(
         endpoint="localhost:50067",
         agent_entity_id="agent:my-agent-001",
     )
-    adapter = CAASSKAdapter(config)
+    adapter = AAGFESKAdapter(config)
 
     kernel = Kernel()
     kernel.add_service(AzureChatCompletion(...))
@@ -50,13 +50,13 @@ from typing import Any, Callable, Optional
 
 import grpc
 
-logger = logging.getLogger("caas.sk_adapter")
+logger = logging.getLogger("aagfe.sk_adapter")
 
 
 # ─── Config ──────────────────────────────────────────────────────────────────
 
 @dataclass
-class CAASSKConfig:
+class AAGFESKConfig:
     endpoint: str                       # e.g. "localhost:50067"
     agent_entity_id: str
     runtime: str = "PYTHON"             # SK_RUNTIME_PYTHON
@@ -70,31 +70,31 @@ class CAASSKConfig:
 
 # ─── Exceptions ───────────────────────────────────────────────────────────────
 
-class CAASFunctionBlockedError(Exception):
+class AAGFEFunctionBlockedError(Exception):
     def __init__(self, reason: str, drift_score: int, review_token: str = ""):
         self.reason = reason
         self.drift_score = drift_score
         self.review_token = review_token
-        super().__init__(f"CAAS BLOCK: {reason} (drift={drift_score})")
+        super().__init__(f"AAGFE BLOCK: {reason} (drift={drift_score})")
 
-class CAASPlannerTerminatedError(Exception):
+class AAGFEPlannerTerminatedError(Exception):
     def __init__(self, reason: str):
-        super().__init__(f"CAAS PLANNER TERMINATE: {reason}")
+        super().__init__(f"AAGFE PLANNER TERMINATE: {reason}")
 
-class CAASAgentMessageBlockedError(Exception):
+class AAGFEAgentMessageBlockedError(Exception):
     def __init__(self, reason: str):
-        super().__init__(f"CAAS A2A BLOCK: {reason}")
+        super().__init__(f"AAGFE A2A BLOCK: {reason}")
 
 
 # ─── Adapter ─────────────────────────────────────────────────────────────────
 
-class CAASSKAdapter:
+class AAGFESKAdapter:
     """
-    Semantic Kernel CAAS reinforcement adapter.
+    Semantic Kernel AAGFE reinforcement adapter.
     One instance per kernel / agent session.
     """
 
-    def __init__(self, config: CAASSKConfig):
+    def __init__(self, config: AAGFESKConfig):
         self.config = config
         self._channel: Optional[grpc.aio.Channel] = None
         self._stub = None
@@ -127,7 +127,7 @@ class CAASSKAdapter:
             self._channel = grpc.aio.secure_channel(self.config.endpoint, creds)
         else:
             self._channel = grpc.aio.insecure_channel(self.config.endpoint)
-        logger.info("CAAS SK adapter connected to %s", self.config.endpoint)
+        logger.info("AAGFE SK adapter connected to %s", self.config.endpoint)
 
     async def close(self) -> None:
         if self._channel:
@@ -172,7 +172,7 @@ class CAASSKAdapter:
         if resp.get("initial_constraint_fragment"):
             self._pending_fragment = resp["initial_constraint_fragment"]
 
-        logger.info("CAAS SK task registered: %s", self._task_id)
+        logger.info("AAGFE SK task registered: %s", self._task_id)
         return self._task_id
 
     async def close_task(self, reason: str = "COMPLETED", summary: str = "") -> dict:
@@ -189,7 +189,7 @@ class CAASSKAdapter:
         })
 
         logger.info(
-            "CAAS SK task closed: %s | drift=%d | purged=%d keys",
+            "AAGFE SK task closed: %s | drift=%d | purged=%d keys",
             self._task_id, close_resp.get("final_drift_score", 0), purge_resp.get("keys_purged", 0),
         )
         self._task_id = None
@@ -216,9 +216,9 @@ class CAASSKAdapter:
                 "sensitivity": "HIGH" if high_sensitivity else "NORMAL",
             })
             if resp.get("bleed_risk"):
-                logger.warning("CAAS memory bleed risk: key=%s origin=%s", key, resp.get("origin_task_id"))
+                logger.warning("AAGFE memory bleed risk: key=%s origin=%s", key, resp.get("origin_task_id"))
         except Exception as e:
-            logger.warning("CAAS RegisterMemoryKey failed (non-blocking): %s", e)
+            logger.warning("AAGFE RegisterMemoryKey failed (non-blocking): %s", e)
 
     # ── A2A ───────────────────────────────────────────────────────────────────
 
@@ -241,9 +241,9 @@ class CAASSKAdapter:
             "session_id":               self._session_id,
         })
         if resp.get("verdict") == "BLOCK":
-            raise CAASAgentMessageBlockedError(resp.get("reason", ""))
+            raise AAGFEAgentMessageBlockedError(resp.get("reason", ""))
         if resp.get("lateral_risk_score", 0) > 0.7:
-            logger.warning("CAAS A2A high lateral risk: receiver=%s score=%.2f",
+            logger.warning("AAGFE A2A high lateral risk: receiver=%s score=%.2f",
                            receiver_agent_entity_id, resp["lateral_risk_score"])
 
     # ── Internal ──────────────────────────────────────────────────────────────
@@ -264,20 +264,20 @@ class CAASSKAdapter:
             "runtime": self.config.runtime,
         })
         latency_ms = int((time.monotonic() - t0) * 1000)
-        logger.debug("CAAS FunctionFilter PRE: fn=%s verdict=%s drift=%d latency=%dms",
+        logger.debug("AAGFE FunctionFilter PRE: fn=%s verdict=%s drift=%d latency=%dms",
                      function_name, resp.get("verdict"), resp.get("drift_score", 0), latency_ms)
 
         verdict = resp.get("verdict", "ALLOW")
         if verdict == "BLOCK":
-            logger.error("CAAS BLOCK: fn=%s reason=%s drift=%d",
+            logger.error("AAGFE BLOCK: fn=%s reason=%s drift=%d",
                          function_name, resp.get("reason"), resp.get("drift_score", 0))
-            raise CAASFunctionBlockedError(
+            raise AAGFEFunctionBlockedError(
                 reason=resp.get("reason", ""),
                 drift_score=resp.get("drift_score", 0),
                 review_token=resp.get("review_token", ""),
             )
         if verdict in ("WARN", "STRONG_WARN"):
-            logger.warning("CAAS %s: fn=%s drift=%d", verdict, function_name, resp.get("drift_score", 0))
+            logger.warning("AAGFE %s: fn=%s drift=%d", verdict, function_name, resp.get("drift_score", 0))
             if resp.get("remediation") == "INJECT_NEXT_TURN":
                 await self._fetch_and_stash_injection()
         return resp
@@ -296,7 +296,7 @@ class CAASSKAdapter:
                 "duration_ms": duration_ms, "session_id": self._session_id,
             })
         except Exception as e:
-            logger.warning("CAAS FunctionFilter POST failed (non-blocking): %s", e)
+            logger.warning("AAGFE FunctionFilter POST failed (non-blocking): %s", e)
 
     async def _handle_auto_function_iteration(self, chat_history: list[dict], function_name: str,
                                                plugin_name: str, function_count: int) -> dict:
@@ -320,14 +320,14 @@ class CAASSKAdapter:
         })
 
         signals = resp.get("signals", [])
-        logger.debug("CAAS AutoFunctionFilter iter=%d verdict=%s drift=%d signals=%s",
+        logger.debug("AAGFE AutoFunctionFilter iter=%d verdict=%s drift=%d signals=%s",
                      self._iteration, resp.get("verdict"), resp.get("drift_score", 0),
                      [s.get("type") for s in signals])
 
         if resp.get("terminate_planner"):
-            logger.error("CAAS TERMINATE PLANNER iter=%d reason=%s",
+            logger.error("AAGFE TERMINATE PLANNER iter=%d reason=%s",
                          self._iteration, resp.get("reason"))
-            raise CAASPlannerTerminatedError(resp.get("reason", ""))
+            raise AAGFEPlannerTerminatedError(resp.get("reason", ""))
 
         if resp.get("inject_before_next") and resp.get("constraint_fragment"):
             self._pending_fragment = resp["constraint_fragment"]
@@ -356,13 +356,13 @@ class CAASSKAdapter:
             if resp.get("injection_required"):
                 self._pending_fragment = resp.get("constraint_fragment")
         except Exception as e:
-            logger.warning("CAAS injection fetch failed: %s", e)
+            logger.warning("AAGFE injection fetch failed: %s", e)
 
 
 # ─── Filter implementations ───────────────────────────────────────────────────
 
 class _FunctionInvocationFilter:
-    def __init__(self, adapter: CAASSKAdapter):
+    def __init__(self, adapter: AAGFESKAdapter):
         self._adapter = adapter
 
     async def on_function_invocation(self, context: Any, next: Callable) -> None:
@@ -374,7 +374,7 @@ class _FunctionInvocationFilter:
         # PRE — synchronous gate on dispatch path
         try:
             await self._adapter._handle_function_pre(fn, plug, args)
-        except CAASFunctionBlockedError:
+        except AAGFEFunctionBlockedError:
             # Abort — do not call next()
             return
 
@@ -391,10 +391,10 @@ class _AutoFunctionInvocationFilter:
     """
     IAutoFunctionInvocationFilter equivalent.
     Fires on each iteration of SK's auto-function selection loop.
-    Gives CAAS CGL visibility into LLM reasoning BEFORE tool selection.
-    This is the novel first-class CGL concept introduced in CAAS v2.
+    Gives AAGFE CGL visibility into LLM reasoning BEFORE tool selection.
+    This is the novel first-class CGL concept introduced in AAGFE v2.
     """
-    def __init__(self, adapter: CAASSKAdapter):
+    def __init__(self, adapter: AAGFESKAdapter):
         self._adapter = adapter
 
     async def on_auto_function_invocation(self, context: Any, next: Callable) -> None:
@@ -418,7 +418,7 @@ class _AutoFunctionInvocationFilter:
                 plugin_name=plug,
                 function_count=fn_count,
             )
-        except CAASPlannerTerminatedError:
+        except AAGFEPlannerTerminatedError:
             # Terminate the planner loop — SK checks context.terminate
             if hasattr(context, "terminate"):
                 context.terminate = True
@@ -428,7 +428,7 @@ class _AutoFunctionInvocationFilter:
 
 
 class _PromptRenderFilter:
-    def __init__(self, adapter: CAASSKAdapter):
+    def __init__(self, adapter: AAGFESKAdapter):
         self._adapter = adapter
 
     async def on_prompt_render(self, context: Any, next: Callable) -> None:

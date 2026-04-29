@@ -1,11 +1,11 @@
 syntax = "proto3";
 
-package caas.v1;
+package aagfe.v1;
 
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 
-option go_package = "github.com/OpenAGX/caas/gen/go/caas/v1;caasv1";
+option go_package = "github.com/openagx/aagfe/gen/go/caas/v1;caasv1";
 
 // Subject identifies who is requesting access.
 message Subject {
@@ -159,7 +159,7 @@ message WatchResponse {
   google.protobuf.Timestamp changed_at = 3;
 }
 
-// AuthorizationService is the core CAAS authorization engine.
+// AuthorizationService is the core AAGFE authorization engine.
 service AuthorizationService {
   // Check whether a subject has a permission on a resource.
   rpc Check(CheckRequest) returns (CheckResponse);

@@ -1,4 +1,4 @@
--- Initialize databases for CAAS services
+-- Initialize databases for AAGFE services
 -- SpiceDB gets its own database (managed by spicedb-migrate)
 CREATE DATABASE spicedb;
 
