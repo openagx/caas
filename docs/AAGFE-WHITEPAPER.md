@@ -245,9 +245,11 @@ Structured JSON logging with trace IDs:
 
 - Google Zanzibar: Google's Consistent, Global Authorization System (ATC '19)
 - OpenFGA: Fine-Grained Authorization Protocol (github.com/openfga)
+- Open Policy Agent: Policy Language and Evaluation (openpolicyagent.org)
 - OWASP Top 10 for Agentic Applications (2025)
-- Open Policy Agent: Policy Language and Evaluation
 - W3C Decentralized Identifiers (DIDs) v1.0
+- SpiceDB: Open Source Zanzibar (authzed.com)
+- Behavioral Anomaly Detection for AI Agents (Multimodal Threat Intelligence, 2024)
 
 ---
 
