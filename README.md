@@ -107,6 +107,42 @@ curl -f http://localhost:3001/health
 curl -f http://localhost:8181/health
 ```
 
+## Deploy
+
+### Docker Compose
+
+```bash
+cp .env.example .env
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+```
+
+### Operations
+
+```bash
+# Check container health/status
+docker compose ps
+
+# Follow logs for gateway and policy sidecar
+docker compose logs -f api-gateway authz-opa-sidecar
+
+# Recreate services after config changes
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+
+# Stop all services
+docker compose -f docker-compose.yml -f docker-compose.prod.yml down
+```
+
+### Security defaults
+
+This deployment uses:
+
+- no committed secrets
+- documented environment variables
+- health checks
+- restart policies
+- least-privilege runtime settings where supported
+- reverse proxy TLS termination where applicable
+
 ## Operational Endpoints
 
 - `GET /health` — Liveness probe
